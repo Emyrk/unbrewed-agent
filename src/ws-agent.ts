@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import { chooseValidatedAction } from './actions.js';
-import type { HermesClient } from './hermes.js';
+import type { PolicyClient } from './hermes.js';
 import { buildPolicyRequest } from './prompt.js';
 import { PROTOCOL_VERSION, type ServerStateMessage } from './protocol.js';
 
@@ -11,7 +11,7 @@ export interface AgentRunOptions {
   create?: boolean;
   botDifficulty?: 'easy' | 'medium' | 'hard' | undefined;
   strategyNotes?: string[] | undefined;
-  hermes?: HermesClient | undefined;
+  hermes?: PolicyClient | undefined;
   maxActions?: number | undefined;
 }
 
@@ -42,18 +42,21 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     decisionInFlight = true;
     try {
       const request = buildPolicyRequest({ state, seat, roomId, strategyNotes: options.strategyNotes });
+      const startedAt = Date.now();
+      console.log(JSON.stringify({ event: 'decision_started', roomId, seat, legalActions: state.legalActions.length, actionsSubmitted }));
       let raw = '';
       if (options.hermes) {
         raw = await options.hermes.complete(request.system, request.user);
       } else {
         raw = 'No Hermes client configured';
       }
+      const latencyMs = Date.now() - startedAt;
       if (stopping || actionsSubmitted >= maxActions) return;
       const choice = chooseValidatedAction(raw, state.legalActions);
       if (choice.source === 'fallback') fallbacks++;
       send({ v: PROTOCOL_VERSION, type: 'ACTION', roomId, action: choice.action });
       actionsSubmitted++;
-      console.log(JSON.stringify({ event: 'action_submitted', actionsSubmitted, source: choice.source, reason: choice.reason, error: choice.error ?? null }));
+      console.log(JSON.stringify({ event: 'action_submitted', actionsSubmitted, source: choice.source, latencyMs, reason: choice.reason, error: choice.error ?? null }));
       if (actionsSubmitted >= maxActions) {
         stopping = true;
         ws.close(1000, 'max actions reached');
@@ -66,6 +69,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   return await new Promise<AgentRunResult>((resolve, reject) => {
     const done = () => resolve({ roomId, seat, actionsSubmitted, fallbacks });
     ws.on('open', () => {
+      console.log(JSON.stringify({ event: 'ws_open', wsUrl: options.wsUrl, command: options.create ? 'create-bot' : 'join', roomId: options.roomId ?? null }));
       if (options.create) {
         send({
           v: PROTOCOL_VERSION,
@@ -76,6 +80,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
       } else {
         if (!options.roomId) throw new Error('roomId is required unless create=true');
         send({ v: PROTOCOL_VERSION, type: 'JOIN_ROOM', roomId: options.roomId, heroId: options.heroId });
+        console.log(JSON.stringify({ event: 'join_sent', roomId: options.roomId, heroId: options.heroId }));
       }
     });
     ws.on('message', (data) => {
@@ -87,6 +92,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         return;
       }
       if (msg.type === 'STATE') {
+        console.log(JSON.stringify({ event: 'state_received', roomId, seat, legalActions: Array.isArray(msg.legalActions) ? msg.legalActions.length : null, decisionInFlight, actionsSubmitted }));
         void act(msg as unknown as ServerStateMessage).catch(reject);
         return;
       }

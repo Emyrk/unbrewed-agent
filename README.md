@@ -15,22 +15,40 @@ npm install
 npm test
 npm run typecheck
 
-# Create a room against a built-in server bot and let Hermes play this seat.
-export HERMES_API_KEY=$(grep '^API_SERVER_KEY=' ~/.hermes/.env | cut -d= -f2-)
+# Create a room against a built-in server bot and call ChatGPT Codex directly
+# using Hermes' stored openai-codex OAuth subscription.
 npx tsx src/cli.ts create-bot \
   --ws-url ws://127.0.0.1:8787 \
   --hero-id king-taranis \
   --bot easy \
+  --policy codex-direct \
+  --codex-model gpt-5.5 \
   --max-actions 1
 
-# Join an existing lobby as the external player.
+# Join an existing lobby as the external player with direct Codex calls.
 npx tsx src/cli.ts join \
-  --ws-url ws://127.0.0.1:8787 \
+  --ws-url wss://unbrewed-engine-production.up.railway.app \
   --room-id ROOM \
-  --hero-id king-taranis
+  --hero-id king-taranis \
+  --policy codex-direct \
+  --codex-model gpt-5.5 \
+  --timeout-ms 45000
+
+# Hermes API-server mode still works, but it is slower because it runs
+# through a full Hermes agent turn.
+export HERMES_API_KEY=$(grep '^API_SERVER_KEY=' ~/.hermes/profiles/unbrewed-player/.env | cut -d= -f2-)
+npx tsx src/cli.ts join \
+  --ws-url wss://unbrewed-engine-production.up.railway.app \
+  --room-id ROOM \
+  --hero-id king-taranis \
+  --policy hermes \
+  --hermes-url http://127.0.0.1:8643/v1 \
+  --hermes-model unbrewed-player
 ```
 
-If `HERMES_API_KEY` is unset, the CLI still runs with deterministic fallback choices. That is useful for smoke tests, not for intelligent play.
+`--policy codex-direct` reads Hermes' `openai-codex` OAuth credentials from `~/.hermes/auth.json`, refreshes them if needed, and calls `https://chatgpt.com/backend-api/codex/responses` directly. It does not print tokens.
+
+If `--policy fallback` is used, the CLI runs with deterministic non-forfeit choices. That is useful for smoke tests, not for intelligent play.
 
 ## Design rules
 

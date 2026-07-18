@@ -1,3 +1,7 @@
+export interface PolicyClient {
+  complete(system: string, user: string): Promise<string>;
+}
+
 export interface HermesClientOptions {
   baseUrl: string;
   apiKey: string;
@@ -5,7 +9,7 @@ export interface HermesClientOptions {
   timeoutMs: number;
 }
 
-export class HermesClient {
+export class HermesClient implements PolicyClient {
   constructor(private readonly options: HermesClientOptions) {}
 
   async complete(system: string, user: string): Promise<string> {

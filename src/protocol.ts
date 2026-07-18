@@ -25,9 +25,32 @@ export interface RoomJoinedMessage {
   you: string;
 }
 
+export interface ReplayMeta {
+  winner: string | null;
+  heroes: Record<string, string>;
+  turns: number;
+  endedAt: number;
+  mapTitle: string;
+}
+
+export interface ReplayBundle {
+  v: 1;
+  engine: { schemaVersion: number; dslVersion: string };
+  config: Json;
+  actionLog: Action[];
+  meta: ReplayMeta;
+}
+
+export interface ReplayBundleMessage {
+  v: number;
+  type: 'REPLAY_BUNDLE';
+  bundle: ReplayBundle;
+}
+
 export type ServerMessage =
   | ServerStateMessage
   | RoomJoinedMessage
+  | ReplayBundleMessage
   | { v: number; type: 'ERROR'; code?: string; message?: string }
   | { v: number; type: string; [key: string]: Json | undefined };
 

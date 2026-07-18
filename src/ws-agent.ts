@@ -2,7 +2,30 @@ import { WebSocket } from 'ws';
 import { chooseValidatedAction } from './actions.js';
 import type { PolicyClient } from './hermes.js';
 import { buildPolicyRequest } from './prompt.js';
-import { PROTOCOL_VERSION, type ServerStateMessage } from './protocol.js';
+import { PROTOCOL_VERSION, type ReplayBundleMessage, type ServerStateMessage } from './protocol.js';
+
+export interface ReplayResultSummary {
+  winner: string | null;
+  won: boolean | null;
+  heroes: Record<string, string>;
+  turns: number;
+  actionCount: number;
+  mapTitle: string;
+  endedAt: number;
+}
+
+export function summarizeReplayBundle(msg: ReplayBundleMessage, seat: string): ReplayResultSummary {
+  const { meta, actionLog } = msg.bundle;
+  return {
+    winner: meta.winner,
+    won: meta.winner === null ? null : meta.winner === seat,
+    heroes: meta.heroes,
+    turns: meta.turns,
+    actionCount: actionLog.length,
+    mapTitle: meta.mapTitle,
+    endedAt: meta.endedAt,
+  };
+}
 
 export interface AgentRunOptions {
   wsUrl: string;
@@ -20,6 +43,7 @@ export interface AgentRunResult {
   seat: string;
   actionsSubmitted: number;
   fallbacks: number;
+  replayResult: ReplayResultSummary | null;
 }
 
 export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult> {
@@ -28,6 +52,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   let seat = '';
   let actionsSubmitted = 0;
   let fallbacks = 0;
+  let replayResult: ReplayResultSummary | null = null;
   let decisionInFlight = false;
   let stopping = false;
   const maxActions = options.maxActions ?? Number.POSITIVE_INFINITY;
@@ -67,7 +92,7 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
   }
 
   return await new Promise<AgentRunResult>((resolve, reject) => {
-    const done = () => resolve({ roomId, seat, actionsSubmitted, fallbacks });
+    const done = () => resolve({ roomId, seat, actionsSubmitted, fallbacks, replayResult });
     ws.on('open', () => {
       console.log(JSON.stringify({ event: 'ws_open', wsUrl: options.wsUrl, command: options.create ? 'create-bot' : 'join', roomId: options.roomId ?? null }));
       if (options.create) {
@@ -101,6 +126,8 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         return;
       }
       if (msg.type === 'REPLAY_BUNDLE') {
+        replayResult = summarizeReplayBundle(msg as unknown as ReplayBundleMessage, seat);
+        console.log(JSON.stringify({ event: 'replay_result', roomId, seat, ...replayResult }));
         ws.close(1000, 'game over');
       }
     });

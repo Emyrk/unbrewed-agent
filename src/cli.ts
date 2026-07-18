@@ -17,6 +17,7 @@ interface CliOptions {
   codexModel: string;
   codexAuthPath?: string | undefined;
   codexReasoning: 'low' | 'medium' | 'high';
+  pilot?: string | undefined;
   timeoutMs: number;
   maxActions?: number;
   notesPath?: string;
@@ -41,6 +42,7 @@ Options:
   --codex-model ID        Codex direct model, default gpt-5.5
   --codex-auth-path PATH  Hermes auth.json path, default $HERMES_HOME/auth.json or ~/.hermes/auth.json
   --codex-reasoning LVL   low|medium|high, default low
+  --pilot LABEL           Telemetry pilot label, default llm:<model> for model policies
   --timeout-ms N          Policy call timeout, default 45000
   --max-actions N         Stop after N submitted actions, useful for smoke tests
   --notes PATH            Text file with strategy notes, one non-empty line per note
@@ -89,6 +91,7 @@ function parseArgs(argv: string[]): CliOptions {
       case '--codex-model': opts.codexModel = value; break;
       case '--codex-auth-path': opts.codexAuthPath = value; break;
       case '--codex-reasoning': opts.codexReasoning = parseReasoning(value); break;
+      case '--pilot': opts.pilot = value; break;
       case '--timeout-ms': opts.timeoutMs = Number(value); break;
       case '--max-actions': opts.maxActions = Number(value); break;
       case '--notes': opts.notesPath = value; break;
@@ -132,6 +135,13 @@ function buildPolicyClient(opts: CliOptions): PolicyClient | undefined {
   return new HermesClient({ baseUrl: opts.hermesBaseUrl, apiKey: opts.hermesKey, model: opts.hermesModel, timeoutMs: opts.timeoutMs });
 }
 
+function defaultPilot(opts: CliOptions): string {
+  if (opts.pilot) return opts.pilot;
+  if (opts.policy === 'fallback') return 'human';
+  const model = opts.policy === 'codex-direct' ? opts.codexModel : opts.hermesModel;
+  return `llm:${model}`;
+}
+
 const opts = parseArgs(process.argv.slice(2));
 if (opts.command !== 'join' && opts.command !== 'create-bot') {
   throw new Error(`Unknown command ${opts.command}\n\n${usage()}`);
@@ -143,7 +153,7 @@ if (opts.maxActions !== undefined && (!Number.isFinite(opts.maxActions) || opts.
 }
 
 const hermes = buildPolicyClient(opts);
-console.log(JSON.stringify({ event: 'agent_starting', policy: opts.policy, model: opts.policy === 'codex-direct' ? opts.codexModel : opts.hermesModel, timeoutMs: opts.timeoutMs }));
+console.log(JSON.stringify({ event: 'agent_starting', policy: opts.policy, model: opts.policy === 'codex-direct' ? opts.codexModel : opts.hermesModel, pilot: defaultPilot(opts), timeoutMs: opts.timeoutMs }));
 
 const result = await runAgent({
   wsUrl: opts.wsUrl,
@@ -151,6 +161,7 @@ const result = await runAgent({
   heroId: opts.heroId,
   create: opts.command === 'create-bot',
   botDifficulty: opts.command === 'create-bot' ? opts.botDifficulty : undefined,
+  pilot: defaultPilot(opts),
   hermes,
   maxActions: opts.maxActions,
   strategyNotes: loadNotes(opts.notesPath),

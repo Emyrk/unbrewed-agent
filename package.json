@@ -1,0 +1,28 @@
+{
+  "name": "unbrewed-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "External Hermes-backed LLM player for Unbrewed Pro",
+  "bin": {
+    "unbrewed-agent": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx src/cli.ts --help"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.9",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

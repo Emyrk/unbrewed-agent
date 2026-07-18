@@ -1,0 +1,104 @@
+import { WebSocket } from 'ws';
+import { chooseValidatedAction } from './actions.js';
+import type { HermesClient } from './hermes.js';
+import { buildPolicyRequest } from './prompt.js';
+import { PROTOCOL_VERSION, type ServerStateMessage } from './protocol.js';
+
+export interface AgentRunOptions {
+  wsUrl: string;
+  roomId?: string | undefined;
+  heroId: string;
+  create?: boolean;
+  botDifficulty?: 'easy' | 'medium' | 'hard' | undefined;
+  strategyNotes?: string[] | undefined;
+  hermes?: HermesClient | undefined;
+  maxActions?: number | undefined;
+}
+
+export interface AgentRunResult {
+  roomId: string;
+  seat: string;
+  actionsSubmitted: number;
+  fallbacks: number;
+}
+
+export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult> {
+  const ws = new WebSocket(options.wsUrl);
+  let roomId = options.roomId ?? '';
+  let seat = '';
+  let actionsSubmitted = 0;
+  let fallbacks = 0;
+  let decisionInFlight = false;
+  let stopping = false;
+  const maxActions = options.maxActions ?? Number.POSITIVE_INFINITY;
+
+  function send(payload: unknown): void {
+    ws.send(JSON.stringify(payload));
+  }
+
+  async function act(state: ServerStateMessage): Promise<void> {
+    if (stopping || decisionInFlight || actionsSubmitted >= maxActions) return;
+    if (!roomId || !seat || state.legalActions.length === 0) return;
+    decisionInFlight = true;
+    try {
+      const request = buildPolicyRequest({ state, seat, roomId, strategyNotes: options.strategyNotes });
+      let raw = '';
+      if (options.hermes) {
+        raw = await options.hermes.complete(request.system, request.user);
+      } else {
+        raw = 'No Hermes client configured';
+      }
+      if (stopping || actionsSubmitted >= maxActions) return;
+      const choice = chooseValidatedAction(raw, state.legalActions);
+      if (choice.source === 'fallback') fallbacks++;
+      send({ v: PROTOCOL_VERSION, type: 'ACTION', roomId, action: choice.action });
+      actionsSubmitted++;
+      console.log(JSON.stringify({ event: 'action_submitted', actionsSubmitted, source: choice.source, reason: choice.reason, error: choice.error ?? null }));
+      if (actionsSubmitted >= maxActions) {
+        stopping = true;
+        ws.close(1000, 'max actions reached');
+      }
+    } finally {
+      decisionInFlight = false;
+    }
+  }
+
+  return await new Promise<AgentRunResult>((resolve, reject) => {
+    const done = () => resolve({ roomId, seat, actionsSubmitted, fallbacks });
+    ws.on('open', () => {
+      if (options.create) {
+        send({
+          v: PROTOCOL_VERSION,
+          type: 'CREATE_ROOM',
+          heroId: options.heroId,
+          bot: options.botDifficulty ? { difficulty: options.botDifficulty } : undefined,
+        });
+      } else {
+        if (!options.roomId) throw new Error('roomId is required unless create=true');
+        send({ v: PROTOCOL_VERSION, type: 'JOIN_ROOM', roomId: options.roomId, heroId: options.heroId });
+      }
+    });
+    ws.on('message', (data) => {
+      const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+      if (msg.type === 'ROOM_CREATED' || msg.type === 'ROOM_JOINED') {
+        roomId = String(msg.roomId);
+        seat = String(msg.you);
+        console.log(JSON.stringify({ event: msg.type, roomId, seat }));
+        return;
+      }
+      if (msg.type === 'STATE') {
+        void act(msg as unknown as ServerStateMessage).catch(reject);
+        return;
+      }
+      if (msg.type === 'ERROR') {
+        reject(new Error(`${String(msg.code ?? 'ERROR')}: ${String(msg.message ?? 'unknown error')}`));
+        return;
+      }
+      if (msg.type === 'REPLAY_BUNDLE') {
+        ws.close(1000, 'game over');
+      }
+    });
+    ws.on('close', done);
+    ws.on('error', reject);
+  });
+}

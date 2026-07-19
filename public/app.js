@@ -52,7 +52,9 @@ function showApp() {
   app.style.display = 'block';
   renderUserInfo();
   connectLiveWs();
-  navigate(currentPage);
+  const requestedGameId = new URLSearchParams(location.search).get('game');
+  if (requestedGameId) navigate('game-detail', { id: requestedGameId });
+  else navigate(currentPage);
 }
 
 function renderUserInfo() {
@@ -76,6 +78,10 @@ nav.addEventListener('click', (e) => {
 function navigate(page, params = {}) {
   currentPage = page;
   if (page !== 'game-detail') currentGameDetailId = null;
+  const nextUrl = page === 'game-detail' && params.id
+    ? `${location.pathname}?game=${encodeURIComponent(params.id)}`
+    : location.pathname;
+  history.replaceState({}, '', nextUrl);
   if (detailElapsedTimer) {
     clearInterval(detailElapsedTimer);
     detailElapsedTimer = null;
@@ -292,6 +298,8 @@ async function renderGameDetail(id) {
           <span>Model: <strong>${escapeHtml(g.llm_model)}</strong></span>
           <span>Map: ${escapeHtml(g.map_title || '?')}</span>
           ${replayUrl ? `<a href="${replayUrl}" target="_blank" class="replay-link">▶ Replays</a>` : ''}
+          <button class="replay-link log-button" onclick="copyGameLogUrl('${id}')">Copy log URL</button>
+          <button class="replay-link log-button" onclick="downloadGameDiagnostic('${id}')">Download diagnostic</button>
         </div>
       </div>
       <div class="game-result ${resultClass}" id="detail-result" style="font-size:1.5rem">${result}</div>
@@ -319,6 +327,33 @@ async function renderGameDetail(id) {
   detailElapsedTimer = setInterval(() => {
     if (currentGameDetailId === id) updateDetailElapsed();
   }, 1000);
+}
+
+async function copyGameLogUrl(gameId) {
+  const url = `${location.origin}${location.pathname}?game=${encodeURIComponent(gameId)}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    alert('Owner-only game log URL copied. The viewer must sign in as the same Discord user.');
+  } catch {
+    prompt('Copy this owner-only game log URL:', url);
+  }
+}
+
+async function downloadGameDiagnostic(gameId) {
+  const response = await fetch(`/api/games/${gameId}/export`);
+  if (!response.ok) {
+    alert('Could not export this game diagnostic.');
+    return;
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `unbrewed-game-${gameId}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function renderGameLiveMonitor(game, live) {
@@ -364,12 +399,15 @@ function actionRowHtml(gameId, action) {
   const promptTokens = Number(action.prompt_tokens || 0);
   const completionTokens = Number(action.completion_tokens || 0);
   const totalTokens = Number(action.total_tokens || promptTokens + completionTokens);
+  const cacheReadTokens = Number(action.cache_read_tokens || 0);
+  const validity = actionValidationInfo(action);
+  const cache = cacheStatusInfo(action);
   return `
     <button class="action-row action-row-clickable" onclick="openActionDetail('${gameId}', '${action.id}')">
       <div class="action-index">#${action.action_index}</div>
       <div class="action-reason">${escapeHtml(action.reason || '-')}</div>
-      <div class="action-source ${action.choice_source}">${escapeHtml(action.choice_source)}</div>
-      <div class="action-tokens" title="${promptTokens} input + ${completionTokens} output">${formatTokenCount(totalTokens)} tok</div>
+      <div class="action-validity ${validity.className}" title="${escapeHtml(validity.title)}">${validity.label}</div>
+      <div class="action-tokens" title="${promptTokens} input + ${completionTokens} output; ${cacheReadTokens} cache-read">${cache.icon} ${formatTokenCount(totalTokens)} tok</div>
       <div class="action-cost">${formatCost(action.cost_usd)}</div>
       <div class="action-latency">${formatDuration(action.latency_ms)}</div>
     </button>
@@ -390,6 +428,8 @@ async function openActionDetail(gameId, actionId) {
   if (!data?.action) return;
   const action = data.action;
   const totalTokens = Number(action.total_tokens || (Number(action.prompt_tokens || 0) + Number(action.completion_tokens || 0)));
+  const validity = actionValidationInfo(action);
+  const cache = cacheStatusInfo(action);
   const systemChars = String(action.system_prompt || '').length;
   const userChars = String(action.user_prompt || '').length;
   const modal = document.createElement('div');
@@ -401,7 +441,7 @@ async function openActionDetail(gameId, actionId) {
         <div>
           <div class="card-title">Action #${action.action_index}</div>
           <div class="action-detail-summary">
-            ${formatCost(action.cost_usd)} · ${formatTokenCount(totalTokens)} tokens · ${formatDuration(action.latency_ms)}
+            <span class="action-validity ${validity.className}">${validity.label}</span> · ${cache.label} · ${formatCost(action.cost_usd)} · ${formatTokenCount(totalTokens)} tokens · ${formatDuration(action.latency_ms)}
           </div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="closeActionDetail()">✕</button>
@@ -885,6 +925,29 @@ function connectLiveWs() {
 }
 
 // ─── Utilities ─────────────────────────────────────────
+
+function actionValidationInfo(action) {
+  if (action.choice_source === 'model' && !action.error_message) {
+    return {
+      label: 'VALID',
+      className: 'valid',
+      title: 'The model output selected an in-range legal action. Engine acceptance is inferred from subsequent state.',
+    };
+  }
+  return {
+    label: 'FALLBACK',
+    className: 'invalid',
+    title: action.error_message || 'The model output was invalid or unavailable, so a fallback action was submitted.',
+  };
+}
+
+function cacheStatusInfo(action) {
+  const reads = Number(action.cache_read_tokens || 0);
+  const writes = Number(action.cache_write_tokens || 0);
+  if (reads > 0) return { icon: '⚡', label: `Cache hit: ${formatTokenCount(reads)} tokens` };
+  if (writes > 0) return { icon: '↥', label: `Cache write: ${formatTokenCount(writes)} tokens` };
+  return { icon: '○', label: 'No cache tokens reported' };
+}
 
 function escapeHtml(value) {
   return String(value ?? '')

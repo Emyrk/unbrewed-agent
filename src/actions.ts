@@ -1,10 +1,8 @@
 import type { Action } from './protocol.js';
 
-export interface IndexedAction {
+export type IndexedAction = Action & {
   index: number;
-  summary: string;
-  action: Action;
-}
+};
 
 export interface ValidatedChoice {
   action: Action;
@@ -26,7 +24,10 @@ export function summarizeAction(action: Action): string {
 }
 
 export function indexLegalActions(actions: Action[]): IndexedAction[] {
-  return actions.map((action, index) => ({ index, action, summary: summarizeAction(action) }));
+  // Keep each legal action exactly once. The previous nested action + summary shape
+  // serialized every action twice, which became especially expensive for movement
+  // effects with a large branching factor.
+  return actions.map((action, index) => ({ ...action, index }));
 }
 
 export function chooseValidatedAction(rawModelOutput: string, legalActions: Action[]): ValidatedChoice {

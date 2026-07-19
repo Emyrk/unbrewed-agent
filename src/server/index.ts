@@ -223,6 +223,45 @@ app.get('/api/games/:id/actions/:actionId', async (c) => {
   return c.json({ action: result.rows[0] });
 });
 
+app.get('/api/games/:id/export', async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const gameId = c.req.param('id');
+  const gameResult = await query(
+    'SELECT * FROM games WHERE id = $1 AND user_id = $2',
+    [gameId, user.id],
+  );
+  if (gameResult.rows.length === 0) return c.json({ error: 'Not found' }, 404);
+
+  const actionsResult = await query(
+    'SELECT * FROM game_actions WHERE game_id = $1 ORDER BY action_index',
+    [gameId],
+  );
+  const actions = actionsResult.rows as Array<Record<string, unknown>>;
+  const numbers = (key: string) => actions.map((action) => Number(action[key] ?? 0));
+  const summary = {
+    actionCount: actions.length,
+    fallbackCount: actions.filter((action) => action.choice_source === 'fallback').length,
+    maxLegalActionCount: Math.max(0, ...numbers('legal_action_count')),
+    maxPromptTokens: Math.max(0, ...numbers('prompt_tokens')),
+    totalPromptTokens: numbers('prompt_tokens').reduce((sum, value) => sum + value, 0),
+    totalCompletionTokens: numbers('completion_tokens').reduce((sum, value) => sum + value, 0),
+    totalCacheReadTokens: numbers('cache_read_tokens').reduce((sum, value) => sum + value, 0),
+    totalCacheWriteTokens: numbers('cache_write_tokens').reduce((sum, value) => sum + value, 0),
+  };
+
+  return c.json({
+    exportedAt: new Date().toISOString(),
+    warning: 'This owner-only diagnostic contains prompts and redacted player views, including your private hand. It does not contain your OpenRouter API key.',
+    game: gameResult.rows[0],
+    summary,
+    actions,
+  }, 200, {
+    'Content-Disposition': `attachment; filename="unbrewed-game-${gameId}.json"`,
+  });
+});
+
 app.delete('/api/games/:id', async (c) => {
   const user = await getSessionUser(c);
   if (!user) return c.json({ error: 'Unauthorized' }, 401);

@@ -43,6 +43,7 @@ describe('OpenRouter usage telemetry', () => {
     const request = vi.mocked(globalThis.fetch).mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(request.body));
     expect(body.session_id).toBe('game-123');
+    expect(body.max_tokens).toBe(80);
     expect(body.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' });
   });
 });

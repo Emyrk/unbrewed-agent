@@ -710,6 +710,16 @@ main {
 }
 .action-source.model { color: var(--green); }
 .action-source.fallback { color: var(--red); }
+.action-validity {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+}
+.action-validity.valid { color: var(--green); }
+.action-validity.invalid { color: var(--red); }
+.log-button { font-family: var(--font); background: transparent; cursor: pointer; }
+
 .action-tokens { color: var(--text-dim); font-size: 0.8rem; font-family: monospace; }
 .action-cost { color: var(--gold); font-family: monospace; }
 .action-latency { color: var(--text-dim); font-family: monospace; }

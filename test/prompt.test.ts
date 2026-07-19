@@ -9,6 +9,10 @@ describe('policy prompt contract', () => {
     expect(GAMEPLAY_SYSTEM_PROMPT).toContain('exactly 2 actions');
     expect(GAMEPLAY_SYSTEM_PROMPT).toContain('MANEUVER');
     expect(GAMEPLAY_SYSTEM_PROMPT).toContain('EXHAUSTION');
+    expect(GAMEPLAY_SYSTEM_PROMPT).toContain('more than 7');
+    expect(GAMEPLAY_SYSTEM_PROMPT).toContain('high-priority inefficiency');
+    expect(GAMEPLAY_SYSTEM_PROMPT).toContain('profitable attacks');
+    expect(GAMEPLAY_SYSTEM_PROMPT).toContain('12 words');
     expect(GAMEPLAY_SYSTEM_PROMPT).toContain('Do not call tools');
     expect(GAMEPLAY_SYSTEM_PROMPT).toContain('Output JSON only');
     expect(GAMEPLAY_SYSTEM_PROMPT).toContain('Choose exactly one legal action by index');
@@ -46,6 +50,19 @@ describe('policy prompt contract', () => {
     expect(JSON.stringify(body.matchupContext)).not.toContain('must-not-copy');
   });
 
+  it('adds the Clone Troopers team defeat condition when visible', () => {
+    const state = {
+      type: 'STATE',
+      v: 21,
+      view: { opponent: { heroId: 'clone-troopers', health: 2 } },
+      legalActions: [move],
+    } as unknown as ServerStateMessage;
+
+    const body = JSON.parse(buildPolicyRequest({ state, seat: 'p1', roomId: 'room-1' }).user);
+    expect(body.characterRuleNotes).toHaveLength(1);
+    expect(body.characterRuleNotes[0]).toContain('every Clone');
+  });
+
   it('caps extracted matchup context to avoid runaway prompt size', () => {
     const view = {
       self: {
@@ -73,7 +90,7 @@ describe('policy prompt contract', () => {
     expect(body.roomId).toBe('room-1');
     expect(body.seat).toBe('p1');
     expect(body.view).toEqual(state.view);
-    expect(body.legalActions).toEqual([{ index: 0, summary: 'MANEUVER_DRAW {"player":"p1"}', action: move }]);
+    expect(body.legalActions).toEqual([{ ...move, index: 0 }]);
     expect(body.strategyNotes).toEqual(['value actions that preserve cards']);
   });
 });

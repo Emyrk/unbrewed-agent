@@ -57,6 +57,7 @@ export class OpenRouterClient implements PolicyClient {
             { role: 'user', content: user },
           ],
           temperature: 0.3,
+          max_tokens: 80,
         }),
         signal: controller.signal,
       });

@@ -4,7 +4,7 @@ import type { Json, ServerStateMessage } from './protocol.js';
 export const GAMEPLAY_SYSTEM_PROMPT = `You are playing Unmatched, a competitive asymmetric card-driven miniatures duel, through the Unbrewed Pro rules engine. The engine supplies a redacted player view and the exact legal actions available now. The engine is authoritative about legality and resolution.
 
 OBJECTIVE
-Defeat the opposing hero by reducing its health to 0. Defeating a sidekick does not normally end the game. Victory is checked at action boundaries. Never assume hidden opponent information.
+Defeat the opposing hero or satisfy the opponent's character-specific defeat condition. Most fighters lose when their hero reaches 0 health, but multi-hero/team fighters may require every hero or required fighter to be defeated. Character and rule-card text overrides this generic rule. Victory is checked at action boundaries. Never assume hidden opponent information.
 
 TURN STRUCTURE
 A normal turn has exactly 2 actions; actions cannot be skipped, and the same action may be taken twice:
@@ -28,20 +28,22 @@ CARDS AND FIGHTERS
 A card's banner restricts which fighter may play it; ANY cards may be used by any eligible fighter. Versatile cards may attack or defend. Effects are mandatory unless they say "may". Resolve as much as possible when part cannot resolve. Cards belonging only to defeated fighters generally cannot be played but may still be discarded to boost movement.
 
 HAND AND EXHAUSTION
-The end-of-turn hand limit is 7. The deck is finite and is not reshuffled. If a required card cannot be drawn, each surviving friendly fighter takes 2 damage per missing card. Avoid unnecessary draws near exhaustion unless tactically justified.
+The end-of-turn hand limit is 7. Having exactly 7 cards is legal; if you have more than 7 when your turn ends, you must discard down to 7. Treat ending above 7 as a high-priority inefficiency: prefer spending or playing a useful card before taking a draw that would force a discard, unless the tactical gain clearly outweighs the lost card. The deck is finite and is not reshuffled. If a required card cannot be drawn, each surviving friendly fighter takes 2 damage per missing card. Avoid unnecessary draws near exhaustion unless tactically justified.
 
 DECISION GUIDANCE
 - Evaluate health, position, zones, hand size, deck size, visible discard piles, action economy, and exhaustion risk.
 - Preserve useful defense cards when exposed; avoid wasting cards or movement without tactical value.
+- Actively look for profitable attacks. Do not repeatedly maneuver or scheme while a favorable attack is available unless there is a concrete defensive, positional, or hand-management reason.
 - Consider retaliation and positioning after an attack, not only immediate damage.
 - Use sidekicks for pressure, positioning, and protection while accounting for fighter-specific cards becoming unusable after defeat.
+- Multi-fighter movement effects may be resolved as sequential engine prompts. At each prompt, choose only the best current legal sub-action; do not attempt to output an entire movement sequence.
 - Treat matchupContext only as a compact summary of public or player-visible information. The full redacted view remains the source of truth.
 - Do not invent card text, board connections, rules, or legal actions.
 - Do not infer the opponent's hand or other hidden state.
 
 RESPONSE CONTRACT
-Choose exactly one legal action by index. Do not call tools. Output JSON only, no markdown or prose.
-Required shape: {"choice":number,"confidence":number,"reason":"short tactical reason"}`;
+Choose exactly one legal action by index. Do not call tools. Output JSON only, no markdown or prose. The reason must be one concise tactical clause of at most 12 words; do not restate rules or game state.
+Required shape: {"choice":number,"confidence":number,"reason":"12 words maximum"}`;
 
 export interface BuildPolicyRequestInput {
   state: ServerStateMessage;
@@ -120,14 +122,37 @@ export function buildVisibleMatchupContext(
   };
 }
 
+const CHARACTER_RULE_NOTES: Record<string, string> = {
+  'clone-troopers': 'Clone Troopers are a team fighter. They are defeated only when every Clone is removed from the board. When opposing them, reducing one Clone to 0 is not enough: continue attacking until no Clones remain. When playing them, preserve, position, and summon surviving Clones because every Clone contributes to the defeat condition.',
+};
+
+function normalizeHeroId(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+export function buildCharacterRuleNotes(
+  matchupContext: ReturnType<typeof buildVisibleMatchupContext>,
+): string[] {
+  const heroIds = new Set<string>();
+  if (matchupContext.ownHeroId) heroIds.add(normalizeHeroId(matchupContext.ownHeroId));
+  for (const fact of matchupContext.visibleFacts) {
+    if (/(heroId|hero\.id|characterId)$/i.test(fact.path) && typeof fact.value === 'string') {
+      heroIds.add(normalizeHeroId(fact.value));
+    }
+  }
+  return [...heroIds].map((heroId) => CHARACTER_RULE_NOTES[heroId]).filter((note): note is string => Boolean(note));
+}
+
 export function buildPolicyRequest(input: BuildPolicyRequestInput): PolicyRequest {
+  const matchupContext = buildVisibleMatchupContext(input.state.view, input.ownHeroId);
   return {
     system: GAMEPLAY_SYSTEM_PROMPT,
     user: JSON.stringify({
       objective: 'win the match',
       roomId: input.roomId,
       seat: input.seat,
-      matchupContext: buildVisibleMatchupContext(input.state.view, input.ownHeroId),
+      matchupContext,
+      characterRuleNotes: buildCharacterRuleNotes(matchupContext),
       view: input.state.view,
       recentEvents: input.state.events ?? [],
       legalActions: indexLegalActions(input.state.legalActions),

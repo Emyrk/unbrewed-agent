@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { indexLegalActions, chooseValidatedAction, summarizeAction } from '../src/actions.js';
+import { indexLegalActions, chooseValidatedAction } from '../src/actions.js';
 import type { Action } from '../src/protocol.js';
 
 const attack = { type: 'ATTACK', player: 'p1', attacker: 'a', defender: 'd', card: 'c1' } as unknown as Action;
@@ -7,14 +7,13 @@ const maneuver = { type: 'MANEUVER_DRAW', player: 'p1' } as unknown as Action;
 const forfeit = { type: 'FORFEIT', player: 'p1' } as unknown as Action;
 
 describe('action indexing', () => {
-  it('preserves exact legal action objects while adding stable indexes and summaries', () => {
+  it('serializes each legal action once while adding a stable index', () => {
     const indexed = indexLegalActions([attack, maneuver]);
 
     expect(indexed).toEqual([
-      { index: 0, action: attack, summary: summarizeAction(attack) },
-      { index: 1, action: maneuver, summary: summarizeAction(maneuver) },
+      { ...attack, index: 0 },
+      { ...maneuver, index: 1 },
     ]);
-    expect(indexed[0]!.action).toBe(attack);
   });
 });
 

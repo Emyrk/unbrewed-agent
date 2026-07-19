@@ -298,8 +298,10 @@ async function renderGameDetail(id) {
           <span>Model: <strong>${escapeHtml(g.llm_model)}</strong></span>
           <span>Map: ${escapeHtml(g.map_title || '?')}</span>
           ${replayUrl ? `<a href="${replayUrl}" target="_blank" class="replay-link">▶ Replays</a>` : ''}
-          <button class="replay-link log-button" onclick="copyGameLogUrl('${id}')">Copy log URL</button>
+          <button class="replay-link log-button" onclick="copyGameLogUrl('${id}')">Copy private log URL</button>
           <button class="replay-link log-button" onclick="downloadGameDiagnostic('${id}')">Download diagnostic</button>
+          <button class="replay-link log-button" onclick="createDebugShare('${id}')">Create debug share</button>
+          <button class="replay-link log-button" onclick="revokeDebugShares('${id}')">Revoke shares</button>
         </div>
       </div>
       <div class="game-result ${resultClass}" id="detail-result" style="font-size:1.5rem">${result}</div>
@@ -337,6 +339,30 @@ async function copyGameLogUrl(gameId) {
   } catch {
     prompt('Copy this owner-only game log URL:', url);
   }
+}
+
+async function createDebugShare(gameId) {
+  const confirmed = confirm(
+    'Create a public diagnostic URL? Anyone with it can read all prompts and private hand snapshots for 7 days. Your OpenRouter key is never included.'
+  );
+  if (!confirmed) return;
+  const data = await api(`/games/${gameId}/share`, { method: 'POST', body: '{}' });
+  if (!data?.url) {
+    alert(data?.error || 'Could not create debug share.');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(data.url);
+    alert(`Public debug URL copied. It expires ${new Date(data.expiresAt).toLocaleString()}.`);
+  } catch {
+    prompt('Copy this public debug URL:', data.url);
+  }
+}
+
+async function revokeDebugShares(gameId) {
+  const data = await api(`/games/${gameId}/share`, { method: 'DELETE' });
+  if (!data) return;
+  alert(`Revoked ${data.revoked || 0} active debug share(s).`);
 }
 
 async function downloadGameDiagnostic(gameId) {
@@ -454,6 +480,7 @@ async function openActionDetail(gameId, actionId) {
         <div><strong>${Number(action.cache_write_tokens || 0).toLocaleString()}</strong><span>Cache-write tokens</span></div>
         <div><strong>${formatCost(action.cost_usd)}</strong><span>Cost</span></div>
         <div><strong>${action.legal_action_count ?? '-'}</strong><span>Legal actions</span></div>
+        <div><strong>${escapeHtml(action.native_finish_reason || action.finish_reason || '-')}</strong><span>Finish reason</span></div>
       </div>
       <div class="action-detail-scroll">
         <section><h3>System prompt · ${systemChars.toLocaleString()} characters</h3><pre id="action-system-prompt"></pre></section>
@@ -467,7 +494,7 @@ async function openActionDetail(gameId, actionId) {
   document.body.appendChild(modal);
   $('#action-system-prompt').textContent = action.system_prompt || 'Not recorded for this older action.';
   $('#action-user-prompt').textContent = prettyJson(action.user_prompt);
-  $('#action-model-output').textContent = action.model_output || 'No model output recorded.';
+  $('#action-model-output').textContent = action.model_output || `No visible model output. Finish reason: ${action.native_finish_reason || action.finish_reason || 'unknown'}.`;
   $('#action-selected-action').textContent = JSON.stringify(action.selected_action, null, 2);
   if (action.error_message && $('#action-error')) $('#action-error').textContent = action.error_message;
   modal.addEventListener('click', (event) => { if (event.target === modal) closeActionDetail(); });

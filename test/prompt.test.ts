@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPolicyRequest, GAMEPLAY_SYSTEM_PROMPT } from '../src/prompt.js';
+import { buildPolicyRequest, buildVisibleMatchupContext, GAMEPLAY_SYSTEM_PROMPT } from '../src/prompt.js';
 import type { Action, ServerStateMessage } from '../src/protocol.js';
 
 const move = { type: 'MANEUVER_DRAW', player: 'p1' } as unknown as Action;
@@ -36,18 +36,16 @@ describe('policy prompt contract', () => {
       legalActions: [move],
     } as unknown as ServerStateMessage;
 
-    const body = JSON.parse(buildPolicyRequest({
-      state,
-      seat: 'p1',
-      roomId: 'room-1',
-      ownHeroId: 'king-taranis',
-    }).user);
+    const context = buildVisibleMatchupContext(state.view, 'king-taranis');
 
-    expect(body.matchupContext.ownHeroId).toBe('king-taranis');
-    expect(body.matchupContext.visibleFacts).toContainEqual({ path: 'self.deckSize', value: 12 });
-    expect(body.matchupContext.visibleFacts).toContainEqual({ path: 'opponent.heroId', value: 'baba-yaga' });
-    expect(JSON.stringify(body.matchupContext)).not.toContain('hiddenServerState');
-    expect(JSON.stringify(body.matchupContext)).not.toContain('must-not-copy');
+    expect(context.ownHeroId).toBe('king-taranis');
+    expect(context.visibleFacts).toContainEqual({ path: 'self.deckSize', value: 12 });
+    expect(context.visibleFacts).toContainEqual({ path: 'opponent.heroId', value: 'baba-yaga' });
+    expect(JSON.stringify(context)).not.toContain('hiddenServerState');
+    expect(JSON.stringify(context)).not.toContain('must-not-copy');
+
+    const body = JSON.parse(buildPolicyRequest({ state, seat: 'p1', roomId: 'room-1', ownHeroId: 'king-taranis' }).user);
+    expect(body.matchupContext).toBeUndefined();
   });
 
   it('adds the Clone Troopers team defeat condition when visible', () => {
@@ -69,9 +67,8 @@ describe('policy prompt contract', () => {
         cards: Array.from({ length: 100 }, (_, i) => ({ id: `card-${i}`, title: `Card ${i}`, text: 'x'.repeat(200) })),
       },
     };
-    const state = { type: 'STATE', v: 21, view, legalActions: [move] } as unknown as ServerStateMessage;
-    const body = JSON.parse(buildPolicyRequest({ state, seat: 'p1', roomId: 'room-1' }).user);
-    expect(JSON.stringify(body.matchupContext).length).toBeLessThan(14_000);
+    const context = buildVisibleMatchupContext(view as unknown as ServerStateMessage['view']);
+    expect(JSON.stringify(context).length).toBeLessThan(14_000);
   });
 
   it('builds a redacted observation request with indexed legal actions', () => {

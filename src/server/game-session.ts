@@ -47,8 +47,21 @@ export interface GameSessionResult {
 }
 
 const MAX_ACTIONS = 500;
-const CYCLE_WINDOW = 10; // number of recent actions to check for cycles
-const CYCLE_THRESHOLD = 6; // if 6 of last 10 actions are the same type, it's a cycle
+const CYCLE_WINDOW = 10;
+const CYCLE_THRESHOLD = 6;
+
+export function hasRepeatedExactAction(
+  signatures: string[],
+  windowSize = CYCLE_WINDOW,
+  threshold = CYCLE_THRESHOLD,
+): boolean {
+  if (signatures.length < windowSize) return false;
+  const counts = new Map<string, number>();
+  for (const signature of signatures.slice(-windowSize)) {
+    counts.set(signature, (counts.get(signature) ?? 0) + 1);
+  }
+  return [...counts.values()].some((count) => count >= threshold);
+}
 
 export class GameSession {
   private ws: WebSocket | null = null;
@@ -66,7 +79,7 @@ export class GameSession {
   private currentTurn = 0;
   private currentTurnOwner: string | null = null;
   private currentPhase: string | null = null;
-  private recentActionTypes: string[] = []; // for cycle detection
+  private recentActionSignatures: string[] = []; // exact submitted actions for cycle detection
 
   constructor(private readonly config: GameSessionConfig) {
     this.client = new OpenRouterClient({
@@ -277,14 +290,7 @@ export class GameSession {
 
   /** Detect if we're stuck in a cycle of repeated actions. */
   private detectCycle(): boolean {
-    if (this.recentActionTypes.length < CYCLE_WINDOW) return false;
-    const window = this.recentActionTypes.slice(-CYCLE_WINDOW);
-    const counts = new Map<string, number>();
-    for (const t of window) counts.set(t, (counts.get(t) ?? 0) + 1);
-    for (const count of counts.values()) {
-      if (count >= CYCLE_THRESHOLD) return true;
-    }
-    return false;
+    return hasRepeatedExactAction(this.recentActionSignatures);
   }
 
   /** Pick a random non-forfeit action. */
@@ -340,6 +346,8 @@ export class GameSession {
         llmError = err instanceof Error ? err.message : String(err);
         response = {
           text: '',
+          finishReason: null,
+          nativeFinishReason: null,
           usage: {
             prompt_tokens: 0,
             completion_tokens: 0,
@@ -349,6 +357,13 @@ export class GameSession {
             cost_usd: 0,
           },
         };
+      }
+      if (!response.text.trim()) {
+        const emptyOutputError = `OpenRouter returned no visible model output (finish reason: ${response.nativeFinishReason ?? response.finishReason ?? 'unknown'}).`;
+        llmError = [llmError, emptyOutputError].filter(Boolean).join(' | ');
+      } else if (response.finishReason === 'length' || response.nativeFinishReason === 'max_tokens') {
+        const truncationError = `Model output was truncated (${response.nativeFinishReason ?? response.finishReason}).`;
+        llmError = [llmError, truncationError].filter(Boolean).join(' | ');
       }
       const latencyMs = Date.now() - startedAt;
 
@@ -363,21 +378,24 @@ export class GameSession {
       let choice = chooseValidatedAction(response.text, state.legalActions);
       if (choice.source === 'fallback') this.fallbacks++;
 
-      // Cycle detection: if stuck in a loop, switch to random actions
-      this.recentActionTypes.push(choice.action.type);
-      if (this.recentActionTypes.length > CYCLE_WINDOW * 2) {
-        this.recentActionTypes = this.recentActionTypes.slice(-CYCLE_WINDOW);
+      // Detect only repeated exact actions. Counting just action.type caused false
+      // positives during legitimate multi-step prompts such as repeated RESPOND_PROMPT.
+      const signature = JSON.stringify(choice.action);
+      this.recentActionSignatures.push(signature);
+      if (this.recentActionSignatures.length > CYCLE_WINDOW * 2) {
+        this.recentActionSignatures = this.recentActionSignatures.slice(-CYCLE_WINDOW);
       }
       if (this.detectCycle()) {
         const randomAct = this.randomAction(state.legalActions);
         choice = {
           action: randomAct,
           source: 'fallback',
-          reason: 'Cycle detected — switching to random action to break loop.',
+          reason: 'Exact action cycle detected; random action selected to break it.',
           confidence: null,
+          error: `Exact action repeated ${CYCLE_THRESHOLD} times within ${CYCLE_WINDOW} decisions.`,
         };
         this.fallbacks++;
-        console.log(`Game ${this.config.gameId}: cycle detected at action ${this.actionsSubmitted}, using random action`);
+        console.log(`Game ${this.config.gameId}: exact action cycle detected at action ${this.actionsSubmitted}`);
       }
 
       const actionCost = response.usage.cost_usd;
@@ -411,8 +429,10 @@ export class GameSession {
           systemPrompt: request.system,
           userPrompt: request.user,
           modelOutput: response.text,
+          finishReason: response.finishReason,
+          nativeFinishReason: response.nativeFinishReason,
           selectedAction: choice.action,
-          error: choice.error ?? llmError,
+          error: [llmError, choice.error].filter(Boolean).join(' | ') || null,
         },
       });
     } finally {

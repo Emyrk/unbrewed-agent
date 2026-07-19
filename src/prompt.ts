@@ -37,7 +37,7 @@ DECISION GUIDANCE
 - Consider retaliation and positioning after an attack, not only immediate damage.
 - Use sidekicks for pressure, positioning, and protection while accounting for fighter-specific cards becoming unusable after defeat.
 - Multi-fighter movement effects may be resolved as sequential engine prompts. At each prompt, choose only the best current legal sub-action; do not attempt to output an entire movement sequence.
-- Treat matchupContext only as a compact summary of public or player-visible information. The full redacted view remains the source of truth.
+- Treat the supplied redacted view as the source of truth. Character-specific notes are derived only from player-visible information.
 - Do not invent card text, board connections, rules, or legal actions.
 - Do not infer the opponent's hand or other hidden state.
 
@@ -151,7 +151,6 @@ export function buildPolicyRequest(input: BuildPolicyRequestInput): PolicyReques
       objective: 'win the match',
       roomId: input.roomId,
       seat: input.seat,
-      matchupContext,
       characterRuleNotes: buildCharacterRuleNotes(matchupContext),
       view: input.state.view,
       recentEvents: input.state.events ?? [],

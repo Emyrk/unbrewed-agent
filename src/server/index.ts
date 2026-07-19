@@ -20,6 +20,7 @@ import {
 import { GameManager } from './game-manager.js';
 import { query } from './db.js';
 import { filterCacheCapableModels, type OpenRouterModelsResponse } from './model-cache.js';
+import { createShareToken, hashShareToken } from './share-token.js';
 import type { GameEvent } from './game-session.js';
 
 // Catch unhandled errors so we can see them in Railway logs
@@ -193,7 +194,7 @@ app.get('/api/games/:id', async (c) => {
     `SELECT id, game_id, action_index, turn_number, legal_action_count, chosen_index,
             choice_source, confidence, reason, prompt_tokens, completion_tokens,
             total_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
-            latency_ms, error_message, created_at
+            latency_ms, finish_reason, native_finish_reason, error_message, created_at
      FROM game_actions WHERE game_id = $1 ORDER BY action_index`,
     [gameId],
   );
@@ -259,6 +260,68 @@ app.get('/api/games/:id/export', async (c) => {
     actions,
   }, 200, {
     'Content-Disposition': `attachment; filename="unbrewed-game-${gameId}.json"`,
+  });
+});
+
+app.post('/api/games/:id/share', async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const gameId = c.req.param('id');
+  const gameResult = await query('SELECT id FROM games WHERE id = $1 AND user_id = $2', [gameId, user.id]);
+  if (gameResult.rows.length === 0) return c.json({ error: 'Not found' }, 404);
+
+  const token = createShareToken();
+  const tokenHash = hashShareToken(token);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await query(
+    'INSERT INTO game_shares (game_id, created_by, token_hash, expires_at) VALUES ($1, $2, $3, $4)',
+    [gameId, user.id, tokenHash, expiresAt],
+  );
+  const publicBase = (process.env.PUBLIC_URL || new URL(c.req.url).origin).replace(/\/+$/, '');
+  return c.json({
+    url: `${publicBase}/shared/${token}`,
+    expiresAt: expiresAt.toISOString(),
+    warning: 'Anyone with this URL can read the full diagnostic, including prompts and your private hand snapshots.',
+  });
+});
+
+app.delete('/api/games/:id/share', async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  const result = await query(
+    `UPDATE game_shares s SET revoked_at = now()
+     FROM games g
+     WHERE s.game_id = $1 AND s.game_id = g.id AND g.user_id = $2 AND s.revoked_at IS NULL`,
+    [c.req.param('id'), user.id],
+  );
+  return c.json({ revoked: result.rowCount ?? 0 });
+});
+
+app.get('/shared/:token', async (c) => {
+  const tokenHash = hashShareToken(c.req.param('token'));
+  const shareResult = await query<{ game_id: string }>(
+    `SELECT game_id FROM game_shares
+     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
+    [tokenHash],
+  );
+  const gameId = shareResult.rows[0]?.game_id;
+  if (!gameId) return c.json({ error: 'Share not found, expired, or revoked' }, 404);
+
+  const gameResult = await query('SELECT * FROM games WHERE id = $1', [gameId]);
+  if (gameResult.rows.length === 0) return c.json({ error: 'Game not found' }, 404);
+  const actionsResult = await query('SELECT * FROM game_actions WHERE game_id = $1 ORDER BY action_index', [gameId]);
+  const game = { ...(gameResult.rows[0] as Record<string, unknown>) };
+  delete game.user_id;
+
+  return c.json({
+    sharedDiagnostic: true,
+    warning: 'This diagnostic was intentionally shared by its owner and may contain private hand snapshots. It never contains an OpenRouter API key.',
+    game,
+    actions: actionsResult.rows,
+  }, 200, {
+    'Cache-Control': 'no-store',
+    'X-Robots-Tag': 'noindex, nofollow',
   });
 });
 

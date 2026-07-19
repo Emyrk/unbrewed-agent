@@ -95,6 +95,20 @@ export async function migrate(): Promise<void> {
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS model_output TEXT;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS selected_action JSONB;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS error_message TEXT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS finish_reason TEXT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS native_finish_reason TEXT;`);
+  await q(`
+    CREATE TABLE IF NOT EXISTS game_shares (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      game_id     UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+      created_by  TEXT NOT NULL REFERENCES users(id),
+      token_hash  TEXT UNIQUE NOT NULL,
+      expires_at  TIMESTAMPTZ NOT NULL,
+      revoked_at  TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await q(`CREATE INDEX IF NOT EXISTS idx_game_shares_game ON game_shares(game_id);`);
   await q(`CREATE INDEX IF NOT EXISTS idx_game_actions_game ON game_actions(game_id);`);
   await q(`CREATE INDEX IF NOT EXISTS idx_games_user ON games(user_id);`);
   await q(`CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);`);

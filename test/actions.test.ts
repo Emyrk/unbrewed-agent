@@ -33,6 +33,15 @@ describe('validated action choice', () => {
     expect(result.source).toBe('model');
   });
 
+  it('accepts the exact fenced JSON shape produced by gameplay models', () => {
+    const raw = '```json\n{"choice":1,"confidence":0.9,"reason":"Draw to find attack options and reposition Veyra safely."}\n```';
+    const result = chooseValidatedAction(raw, [attack, maneuver]);
+
+    expect(result.action).toBe(maneuver);
+    expect(result.source).toBe('model');
+    expect(result.error).toBeUndefined();
+  });
+
   it('falls back to the first non-forfeit action when output is invalid', () => {
     const result = chooseValidatedAction('I choose to be spooky', [forfeit, maneuver]);
 

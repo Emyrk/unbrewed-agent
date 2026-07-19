@@ -19,6 +19,8 @@ export interface OpenRouterUsage {
 
 export interface OpenRouterResponse {
   text: string;
+  finishReason: string | null;
+  nativeFinishReason: string | null;
   usage: OpenRouterUsage;
 }
 
@@ -57,7 +59,9 @@ export class OpenRouterClient implements PolicyClient {
             { role: 'user', content: user },
           ],
           temperature: 0.3,
-          max_tokens: 80,
+          // Reasoning models may spend completion budget before emitting visible JSON.
+          // Keep the reason concise in the prompt, but leave enough budget to finish.
+          max_tokens: 512,
         }),
         signal: controller.signal,
       });
@@ -67,7 +71,11 @@ export class OpenRouterClient implements PolicyClient {
       }
       const data = (await response.json()) as {
         id?: string;
-        choices?: { message?: { content?: string } }[];
+        choices?: {
+          message?: { content?: string };
+          finish_reason?: string | null;
+          native_finish_reason?: string | null;
+        }[];
         usage?: {
           prompt_tokens?: number;
           completion_tokens?: number;
@@ -81,8 +89,9 @@ export class OpenRouterClient implements PolicyClient {
           cost?: number | string; // OpenRouter sometimes includes cost directly
         };
       };
+      // Preserve empty/partial provider responses together with usage and finish
+      // metadata. GameSession will fall back, while diagnostics retain the cause.
       const text = data.choices?.[0]?.message?.content ?? '';
-      if (!text.trim()) throw new Error('OpenRouter returned empty response');
 
       const promptTokens = data.usage?.prompt_tokens ?? 0;
       const completionTokens = data.usage?.completion_tokens ?? 0;
@@ -106,7 +115,12 @@ export class OpenRouterClient implements PolicyClient {
           ?? 0,
         cost_usd: costUsd,
       };
-      return { text, usage };
+      return {
+        text,
+        finishReason: data.choices?.[0]?.finish_reason ?? null,
+        nativeFinishReason: data.choices?.[0]?.native_finish_reason ?? null,
+        usage,
+      };
     } finally {
       clearTimeout(timeout);
     }

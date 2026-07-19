@@ -34,6 +34,7 @@ export interface AgentRunOptions {
   create?: boolean;
   botDifficulty?: 'easy' | 'medium' | 'hard' | undefined;
   strategyNotes?: string[] | undefined;
+  pilot?: string | undefined;
   hermes?: PolicyClient | undefined;
   maxActions?: number | undefined;
 }
@@ -101,10 +102,11 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
           type: 'CREATE_ROOM',
           heroId: options.heroId,
           bot: options.botDifficulty ? { difficulty: options.botDifficulty } : undefined,
+          pilot: options.pilot,
         });
       } else {
         if (!options.roomId) throw new Error('roomId is required unless create=true');
-        send({ v: PROTOCOL_VERSION, type: 'JOIN_ROOM', roomId: options.roomId, heroId: options.heroId });
+        send({ v: PROTOCOL_VERSION, type: 'JOIN_ROOM', roomId: options.roomId, heroId: options.heroId, pilot: options.pilot });
         console.log(JSON.stringify({ event: 'join_sent', roomId: options.roomId, heroId: options.heroId }));
       }
     });

@@ -415,10 +415,39 @@ main {
   color: var(--bg-dark);
 }
 
-/* ─── Model Picker ─── */
-.model-picker {
-  position: relative;
+/* ─── Modal ─── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 2rem;
 }
+.modal-content {
+  background: var(--bg-card);
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.6);
+  width: 100%;
+  max-width: 800px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ─── Model Picker Summary ─── */
+.model-picker { position: relative; }
 .model-selected-summary {
   display: flex;
   justify-content: space-between;
@@ -442,44 +471,87 @@ main {
   font-size: 0.9rem;
   font-weight: 500;
   color: var(--text);
-  margin-right: 0.5rem;
 }
 .model-dropdown-arrow {
-  font-size: 0.65rem;
-  color: var(--text-dim);
-  transition: transform 0.2s;
+  font-size: 0.75rem;
+  color: var(--gold);
+  font-weight: 600;
 }
-.model-dropdown {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: var(--bg-card);
-  border: 1px solid var(--gold-dim);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  max-height: 400px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-.model-dropdown::-webkit-scrollbar { width: 6px; }
-.model-dropdown::-webkit-scrollbar-track { background: var(--bg-dark); border-radius: 3px; }
-.model-dropdown::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-.model-group {
+/* ─── Model Explorer Modal ─── */
+.model-explorer-toolbar {
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.model-search-input {
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: var(--font);
+  margin-bottom: 0.65rem;
+}
+.model-search-input:focus { outline: none; border-color: var(--gold); }
+.model-search-input::placeholder { color: var(--text-muted); }
+
+.model-provider-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.provider-filter-btn {
+  padding: 0.3rem 0.65rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font);
+}
+.provider-filter-btn:hover { border-color: var(--text-dim); color: var(--text); }
+.provider-filter-btn.active {
+  background: var(--bg-hover);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.provider-count {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-left: 0.2rem;
+}
+
+.model-explorer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+.model-explorer-body::-webkit-scrollbar { width: 6px; }
+.model-explorer-body::-webkit-scrollbar-track { background: var(--bg-dark); }
+.model-explorer-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.mexplorer-group {
   border-bottom: 1px solid var(--border);
 }
-.model-group:last-child { border-bottom: none; }
-.model-group-header {
-  padding: 0.5rem 0.75rem;
+.mexplorer-group:last-child { border-bottom: none; }
+.mexplorer-group-header {
+  padding: 0.55rem 1.25rem;
   background: var(--bg-surface);
   border-left: 3px solid var(--gold);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 .model-provider-name {
   font-size: 0.75rem;
@@ -488,67 +560,68 @@ main {
   letter-spacing: 1.5px;
   color: var(--text);
 }
-.model-group-models {
+.mexplorer-models {
   display: flex;
   flex-direction: column;
 }
-.model-option {
+.mexplorer-model {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.55rem 0.75rem;
+  padding: 0.6rem 1.25rem;
   cursor: pointer;
-  transition: all 0.15s;
-  border-top: 1px solid var(--border);
-  background: var(--bg-card);
+  transition: all 0.12s;
+  border-top: 1px solid rgba(58, 40, 85, 0.5);
 }
-.model-option:hover {
-  background: var(--bg-hover);
-}
-.model-option.selected {
+.mexplorer-model:hover { background: var(--bg-hover); }
+.mexplorer-model.selected {
   background: var(--bg-hover);
   border-left: 3px solid var(--gold);
-  padding-left: calc(0.75rem - 3px);
+  padding-left: calc(1.25rem - 3px);
 }
-.model-option.selected .model-option-name {
-  color: var(--gold);
-}
-.model-option-name {
+.mexplorer-model.selected .mexplorer-model-name { color: var(--gold); }
+
+.mexplorer-model-main { flex: 1; min-width: 0; }
+.mexplorer-model-name {
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.model-option-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.model-tier {
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 0.15rem 0.4rem;
-  border-radius: 3px;
-}
-.model-tier-pro {
-  background: rgba(212, 168, 67, 0.15);
-  color: var(--gold);
-}
-.model-tier-budget {
-  background: rgba(76, 175, 80, 0.15);
-  color: var(--green);
-}
-.model-tier-reasoning {
-  background: rgba(91, 155, 213, 0.15);
-  color: var(--blue);
-}
-.model-price {
-  font-size: 0.75rem;
+.mexplorer-model-id {
+  font-size: 0.7rem;
   color: var(--text-muted);
   font-family: monospace;
-  min-width: 1.5em;
-  text-align: right;
+  margin-top: 0.1rem;
+}
+
+.mexplorer-model-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
+  margin-left: 1rem;
+}
+.mexplorer-model-ctx {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-family: monospace;
+  white-space: nowrap;
+}
+.mexplorer-model-price {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-family: monospace;
+  white-space: nowrap;
+  display: flex;
+  gap: 0.5rem;
+}
+.price-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 
 /* ─── Game Detail ─── */

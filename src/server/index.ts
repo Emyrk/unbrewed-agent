@@ -68,6 +68,27 @@ app.get('/api/me', async (c) => {
   return c.json({ user });
 });
 
+// ─── OpenRouter Models Proxy (cached) ──────────────────
+
+let modelsCache: { data: unknown; fetchedAt: number } | null = null;
+const MODELS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+app.get('/api/models', async (c) => {
+  const now = Date.now();
+  if (modelsCache && now - modelsCache.fetchedAt < MODELS_CACHE_TTL_MS) {
+    return c.json(modelsCache.data);
+  }
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models');
+    if (!res.ok) return c.json({ error: 'Failed to fetch models' }, 502);
+    const data = await res.json();
+    modelsCache = { data, fetchedAt: now };
+    return c.json(data);
+  } catch (err) {
+    return c.json({ error: 'Failed to fetch models' }, 502);
+  }
+});
+
 // ─── Game API Routes ───────────────────────────────────
 
 /** Auth guard helper */

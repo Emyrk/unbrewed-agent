@@ -321,142 +321,227 @@ async function renderGameDetail(id) {
 
 // ─── New Game ──────────────────────────────────────────
 
-// ─── Model Catalog ─────────────────────────────────────
+// ─── Model Explorer ────────────────────────────────────
 
-const MODEL_CATALOG = [
-  {
-    provider: 'Anthropic',
-    color: '#d4a27f',
-    models: [
-      { id: 'anthropic/claude-sonnet-4-20250514', name: 'Claude Sonnet 4', tier: 'pro', price: '$$' },
-      { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', tier: 'pro', price: '$$' },
-      { id: 'anthropic/claude-3.5-haiku', name: 'Claude 3.5 Haiku', tier: 'budget', price: '$' },
-    ],
-  },
-  {
-    provider: 'OpenAI',
-    color: '#74aa9c',
-    models: [
-      { id: 'openai/gpt-4.1', name: 'GPT-4.1', tier: 'pro', price: '$$' },
-      { id: 'openai/gpt-4o', name: 'GPT-4o', tier: 'pro', price: '$$' },
-      { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', tier: 'budget', price: '$' },
-      { id: 'openai/o4-mini', name: 'o4-mini', tier: 'reasoning', price: '$$' },
-    ],
-  },
-  {
-    provider: 'Google',
-    color: '#4285f4',
-    models: [
-      { id: 'google/gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', tier: 'pro', price: '$$' },
-      { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash', tier: 'budget', price: '$' },
-      { id: 'google/gemini-2.5-flash-preview:thinking', name: 'Gemini 2.5 Flash Thinking', tier: 'reasoning', price: '$' },
-    ],
-  },
-  {
-    provider: 'DeepSeek',
-    color: '#5b8def',
-    models: [
-      { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1', tier: 'reasoning', price: '$' },
-      { id: 'deepseek/deepseek-chat-v3-0324', name: 'DeepSeek V3', tier: 'budget', price: '$' },
-      { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', tier: 'budget', price: '$' },
-    ],
-  },
-  {
-    provider: 'Meta',
-    color: '#0668e1',
-    models: [
-      { id: 'meta-llama/llama-4-maverick', name: 'Llama 4 Maverick', tier: 'pro', price: '$' },
-      { id: 'meta-llama/llama-4-scout', name: 'Llama 4 Scout', tier: 'budget', price: '$' },
-    ],
-  },
-  {
-    provider: 'xAI',
-    color: '#999',
-    models: [
-      { id: 'x-ai/grok-3', name: 'Grok 3', tier: 'pro', price: '$$' },
-      { id: 'x-ai/grok-3-mini', name: 'Grok 3 Mini', tier: 'budget', price: '$' },
-    ],
-  },
-  {
-    provider: 'Mistral',
-    color: '#ff7000',
-    models: [
-      { id: 'mistralai/mistral-large-2411', name: 'Mistral Large', tier: 'pro', price: '$$' },
-      { id: 'mistralai/mistral-small-3.1-24b-instruct', name: 'Mistral Small 3.1', tier: 'budget', price: '$' },
-    ],
-  },
-  {
-    provider: 'Qwen',
-    color: '#6c5ce7',
-    models: [
-      { id: 'qwen/qwen3-235b-a22b', name: 'Qwen3 235B', tier: 'pro', price: '$' },
-      { id: 'qwen/qwen3-30b-a3b', name: 'Qwen3 30B', tier: 'budget', price: '$' },
-    ],
-  },
-];
-
+let allModels = [];
+let modelsLoaded = false;
 let selectedModel = localStorage.getItem('selected_model') || 'anthropic/claude-sonnet-4-20250514';
+let selectedModelName = localStorage.getItem('selected_model_name') || 'Claude Sonnet 4';
+
+const PROVIDER_COLORS = {
+  anthropic: '#d4a27f', openai: '#74aa9c', google: '#4285f4', deepseek: '#5b8def',
+  'meta-llama': '#0668e1', 'x-ai': '#999', mistralai: '#ff7000', qwen: '#6c5ce7',
+  cohere: '#39594d', microsoft: '#00a4ef', nvidia: '#76b900', perplexity: '#20808d',
+  'amazon-bedrock': '#ff9900',
+};
+
+async function loadModels() {
+  if (modelsLoaded) return;
+  try {
+    const data = await api('/models');
+    if (data?.data) {
+      // Filter to text models only, exclude free/router/image models
+      allModels = data.data
+        .filter((m) => {
+          if (!m.id || !m.name) return false;
+          // Skip image-only, embedding, free routers
+          if (m.id.includes(':free') && !m.id.includes('free')) return false;
+          if (m.architecture?.output_modalities && !m.architecture.output_modalities.includes('text')) return false;
+          return true;
+        })
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          provider: m.id.split('/')[0] || 'unknown',
+          contextLength: m.context_length || 0,
+          promptPrice: parseFloat(m.pricing?.prompt || '0'),
+          completionPrice: parseFloat(m.pricing?.completion || '0'),
+          description: m.description?.slice(0, 200) || '',
+          created: m.created || 0,
+        }))
+        .sort((a, b) => b.created - a.created);
+      modelsLoaded = true;
+    }
+  } catch (err) {
+    console.error('Failed to load models:', err);
+  }
+}
+
+function getProviderColor(provider) {
+  return PROVIDER_COLORS[provider] || '#888';
+}
+
+function formatPrice(pricePerToken) {
+  if (!pricePerToken || pricePerToken === 0) return 'free';
+  // Price is per token, convert to per 1M tokens
+  const perMillion = pricePerToken * 1_000_000;
+  if (perMillion < 0.01) return '<$0.01/M';
+  if (perMillion < 1) return `$${perMillion.toFixed(2)}/M`;
+  return `$${perMillion.toFixed(1)}/M`;
+}
 
 function renderModelPicker() {
   const picker = $('#model-picker');
   if (!picker) return;
 
-  // Find which provider group contains the selected model
-  const selectedProvider = MODEL_CATALOG.find((g) => g.models.some((m) => m.id === selectedModel))?.provider || '';
-  // Show the selected model name in a summary bar
-  const selectedModelObj = MODEL_CATALOG.flatMap((g) => g.models).find((m) => m.id === selectedModel);
-  const selectedProviderObj = MODEL_CATALOG.find((g) => g.models.some((m) => m.id === selectedModel));
+  const providerSlug = selectedModel.split('/')[0] || '';
+  const color = getProviderColor(providerSlug);
 
   picker.innerHTML = `
-    <div class="model-selected-summary" onclick="toggleModelDropdown()">
+    <div class="model-selected-summary" onclick="openModelExplorer()">
       <div>
-        ${selectedModelObj ? `
-          <span class="model-selected-provider" style="color: ${selectedProviderObj?.color || 'var(--text)'}">${selectedProviderObj?.provider || ''}</span>
-          <span class="model-selected-name">${selectedModelObj.name}</span>
-          <span class="model-tier model-tier-${selectedModelObj.tier}">${selectedModelObj.tier}</span>
-        ` : '<span class="model-selected-name">Select a model...</span>'}
+        <span class="model-selected-provider" style="color: ${color}">${providerSlug}</span>
+        <span class="model-selected-name">${selectedModelName}</span>
       </div>
-      <span class="model-dropdown-arrow">▼</span>
-    </div>
-    <div class="model-dropdown" id="model-dropdown" style="display:none">
-      ${MODEL_CATALOG.map((group) => `
-        <div class="model-group">
-          <div class="model-group-header" style="border-left-color: ${group.color}">
-            <span class="model-provider-name">${group.provider}</span>
-          </div>
-          <div class="model-group-models">
-            ${group.models.map((m) => `
-              <div class="model-option ${m.id === selectedModel ? 'selected' : ''}"
-                   data-model-id="${m.id}"
-                   onclick="event.stopPropagation(); selectModel('${m.id}')">
-                <div class="model-option-name">${m.name}</div>
-                <div class="model-option-meta">
-                  <span class="model-tier model-tier-${m.tier}">${m.tier}</span>
-                  <span class="model-price">${m.price}</span>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `).join('')}
+      <span class="model-dropdown-arrow">Browse ▶</span>
     </div>
   `;
-
   $('#model-select').value = selectedModel;
 }
 
-function toggleModelDropdown() {
-  const dropdown = $('#model-dropdown');
-  if (!dropdown) return;
-  dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+function openModelExplorer() {
+  // Create modal overlay
+  const modal = document.createElement('div');
+  modal.id = 'model-explorer-modal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-content model-explorer">
+      <div class="modal-header">
+        <h2 class="card-title" style="font-size:1rem">Select a Model</h2>
+        <button class="btn btn-outline btn-sm" onclick="closeModelExplorer()">✕</button>
+      </div>
+      <div class="model-explorer-toolbar">
+        <input type="text" id="model-search" class="model-search-input" placeholder="Search models..." oninput="filterModels()">
+        <div class="model-provider-filters" id="provider-filters"></div>
+      </div>
+      <div class="model-explorer-body" id="model-explorer-body">
+        <div class="empty-state"><p>Loading models...</p></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModelExplorer(); });
+
+  loadModels().then(() => {
+    renderProviderFilters();
+    filterModels();
+    $('#model-search')?.focus();
+  });
 }
 
-function selectModel(modelId) {
+let activeProviderFilter = null;
+
+function renderProviderFilters() {
+  const container = $('#provider-filters');
+  if (!container) return;
+
+  // Get unique providers sorted by model count
+  const providerCounts = {};
+  allModels.forEach((m) => {
+    providerCounts[m.provider] = (providerCounts[m.provider] || 0) + 1;
+  });
+  const providers = Object.entries(providerCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15); // Top 15 providers
+
+  container.innerHTML = `
+    <button class="provider-filter-btn ${!activeProviderFilter ? 'active' : ''}"
+            onclick="setProviderFilter(null)">All</button>
+    ${providers.map(([p, count]) => `
+      <button class="provider-filter-btn ${activeProviderFilter === p ? 'active' : ''}"
+              style="--pcolor: ${getProviderColor(p)}"
+              onclick="setProviderFilter('${p}')">${p} <span class="provider-count">${count}</span></button>
+    `).join('')}
+  `;
+}
+
+function setProviderFilter(provider) {
+  activeProviderFilter = provider;
+  renderProviderFilters();
+  filterModels();
+}
+
+function filterModels() {
+  const searchEl = $('#model-search');
+  const query = searchEl ? searchEl.value.toLowerCase().trim() : '';
+  const body = $('#model-explorer-body');
+  if (!body) return;
+
+  let filtered = allModels;
+  if (activeProviderFilter) {
+    filtered = filtered.filter((m) => m.provider === activeProviderFilter);
+  }
+  if (query) {
+    filtered = filtered.filter((m) =>
+      m.name.toLowerCase().includes(query) ||
+      m.id.toLowerCase().includes(query) ||
+      m.provider.toLowerCase().includes(query) ||
+      m.description.toLowerCase().includes(query)
+    );
+  }
+
+  if (filtered.length === 0) {
+    body.innerHTML = '<div class="empty-state"><p>No models found.</p></div>';
+    return;
+  }
+
+  // Group by provider
+  const groups = {};
+  filtered.forEach((m) => {
+    if (!groups[m.provider]) groups[m.provider] = [];
+    groups[m.provider].push(m);
+  });
+
+  // Sort providers: ones with selected model first, then by count
+  const sortedProviders = Object.keys(groups).sort((a, b) => {
+    const aHasSelected = groups[a].some((m) => m.id === selectedModel);
+    const bHasSelected = groups[b].some((m) => m.id === selectedModel);
+    if (aHasSelected && !bHasSelected) return -1;
+    if (!aHasSelected && bHasSelected) return 1;
+    return groups[b].length - groups[a].length;
+  });
+
+  body.innerHTML = sortedProviders.map((provider) => `
+    <div class="mexplorer-group">
+      <div class="mexplorer-group-header" style="border-left-color: ${getProviderColor(provider)}">
+        <span class="model-provider-name">${provider}</span>
+        <span class="provider-count">${groups[provider].length}</span>
+      </div>
+      <div class="mexplorer-models">
+        ${groups[provider].map((m) => `
+          <div class="mexplorer-model ${m.id === selectedModel ? 'selected' : ''}"
+               onclick="pickModel('${m.id}', ${JSON.stringify(m.name).replace(/'/g, "\\'")})">
+            <div class="mexplorer-model-main">
+              <div class="mexplorer-model-name">${m.name}</div>
+              <div class="mexplorer-model-id">${m.id}</div>
+            </div>
+            <div class="mexplorer-model-meta">
+              <div class="mexplorer-model-ctx">${m.contextLength > 0 ? (m.contextLength >= 1000000 ? `${(m.contextLength/1000000).toFixed(1)}M` : `${Math.round(m.contextLength/1000)}k`) : '?'} ctx</div>
+              <div class="mexplorer-model-price">
+                <span class="price-label">in</span> ${formatPrice(m.promptPrice)}
+                <span class="price-label">out</span> ${formatPrice(m.completionPrice)}
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function pickModel(modelId, modelName) {
   selectedModel = modelId;
+  selectedModelName = modelName;
   localStorage.setItem('selected_model', modelId);
-  $('#model-select').value = modelId;
-  // Close dropdown and re-render to update summary
+  localStorage.setItem('selected_model_name', modelName);
+  if ($('#model-select')) $('#model-select').value = modelId;
+  closeModelExplorer();
   renderModelPicker();
+}
+
+function closeModelExplorer() {
+  const modal = $('#model-explorer-modal');
+  if (modal) modal.remove();
 }
 
 function renderNewGame() {
@@ -642,16 +727,6 @@ function timeAgo(date) {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
 }
-
-// ─── Click-outside handler for dropdowns ───────────────
-
-document.addEventListener('click', (e) => {
-  const dropdown = $('#model-dropdown');
-  const picker = document.querySelector('.model-picker');
-  if (dropdown && picker && !picker.contains(e.target)) {
-    dropdown.style.display = 'none';
-  }
-});
 
 // ─── Init ──────────────────────────────────────────────
 

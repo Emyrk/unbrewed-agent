@@ -55,18 +55,32 @@ export class OpenRouterClient implements PolicyClient {
         throw new Error(`OpenRouter ${response.status}: ${text.slice(0, 500)}`);
       }
       const data = (await response.json()) as {
+        id?: string;
         choices?: { message?: { content?: string } }[];
-        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+          cost?: number; // OpenRouter sometimes includes cost directly
+        };
       };
       const text = data.choices?.[0]?.message?.content ?? '';
       if (!text.trim()) throw new Error('OpenRouter returned empty response');
 
-      // OpenRouter returns cost in the generation endpoint or we estimate
+      const promptTokens = data.usage?.prompt_tokens ?? 0;
+      const completionTokens = data.usage?.completion_tokens ?? 0;
+
+      // Try to get cost: OpenRouter includes it in usage.cost or we fetch it
+      let costUsd = data.usage?.cost ?? 0;
+      if (!costUsd && data.id) {
+        costUsd = await fetchGenerationCost(this.options.apiKey, data.id);
+      }
+
       const usage: OpenRouterUsage = {
-        prompt_tokens: data.usage?.prompt_tokens ?? 0,
-        completion_tokens: data.usage?.completion_tokens ?? 0,
-        total_tokens: data.usage?.total_tokens ?? 0,
-        cost_usd: 0, // Will be filled by generation lookup if available
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: data.usage?.total_tokens ?? promptTokens + completionTokens,
+        cost_usd: costUsd,
       };
       return { text, usage };
     } finally {

@@ -241,7 +241,7 @@ function gameRow(g) {
   const time = g.started_at ? timeAgo(new Date(g.started_at)) : '';
   const cost = g.total_cost_usd != null ? formatCost(g.total_cost_usd) : '-';
 
-  const replayUrl = g.room_id && g.status === 'completed' ? `https://pro.unbrewed.xyz/replay/${g.room_id}` : null;
+  const replayUrl = g.room_id && g.status === 'completed' ? `https://unbrewed.xyz/pro/replays` : null;
 
   return `
     <div class="game-row" onclick="navigate('game-detail', {id:'${g.id}'})">
@@ -274,7 +274,7 @@ async function renderGameDetail(id) {
   const result = g.status === 'active' ? 'ACTIVE' : g.won === true ? 'WIN' : g.won === false ? 'LOSS' : g.status.toUpperCase();
   const resultClass = g.won === true ? 'win' : g.won === false ? 'loss' : '';
 
-  const replayUrl = g.room_id ? `https://pro.unbrewed.xyz/replay/${g.room_id}` : null;
+  const replayUrl = g.room_id ? `https://unbrewed.xyz/pro/replays` : null;
 
   app.innerHTML = `
     <div class="detail-header">
@@ -304,13 +304,13 @@ async function renderGameDetail(id) {
     <div class="card" style="margin-top:1.5rem">
       <div class="card-title" style="margin-bottom:0.75rem">Action Log (${actions.length} actions)</div>
       <div class="action-log">
-        ${actions.map((a) => `
+        ${actions.slice().reverse().map((a) => `
           <div class="action-row">
             <div class="action-index">#${a.action_index}</div>
             <div class="action-reason">${a.reason || '-'}</div>
             <div class="action-source ${a.choice_source}">${a.choice_source}</div>
             <div class="action-cost">${formatCost(a.cost_usd)}</div>
-            <div class="action-latency">${a.latency_ms || 0}ms</div>
+            <div class="action-latency">${formatDuration(a.latency_ms)}</div>
           </div>
         `).join('')}
         ${actions.length === 0 ? '<div class="empty-state"><p>No actions recorded yet.</p></div>' : ''}
@@ -675,6 +675,9 @@ function connectLiveWs() {
     const gameId = data.gameId;
     if (!gameId) return;
 
+    // Only process events for the current user
+    if (data.data?.userId && data.data.userId !== currentUser?.id) return;
+
     let game = liveGames.get(gameId);
 
     if (data.type === 'started') {
@@ -725,6 +728,14 @@ function formatCost(value) {
   if (n >= 1) return `$${n.toFixed(2)}`;
   if (n >= 0.01) return `$${n.toFixed(4)}`;
   return `$${n.toFixed(6)}`;
+}
+
+function formatDuration(ms) {
+  const n = Number(ms || 0);
+  if (n === 0) return '-';
+  if (n < 1000) return `${n}ms`;
+  if (n < 60000) return `${(n / 1000).toFixed(1)}s`;
+  return `${Math.floor(n / 60000)}m ${Math.round((n % 60000) / 1000)}s`;
 }
 
 function timeAgo(date) {

@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 import { chooseValidatedAction } from '../actions.js';
 import { buildPolicyRequest } from '../prompt.js';
-import { PROTOCOL_VERSION, type ReplayBundleMessage, type ServerStateMessage } from '../protocol.js';
+import { PROTOCOL_VERSION, type Action, type ReplayBundleMessage, type ServerStateMessage } from '../protocol.js';
 import { OpenRouterClient, type OpenRouterResponse } from './openrouter.js';
 
 /**
@@ -46,6 +46,10 @@ export interface GameSessionResult {
   totalTurns: number;
 }
 
+const MAX_ACTIONS = 500;
+const CYCLE_WINDOW = 10; // number of recent actions to check for cycles
+const CYCLE_THRESHOLD = 6; // if 6 of last 10 actions are the same type, it's a cycle
+
 export class GameSession {
   private ws: WebSocket | null = null;
   private roomId = '';
@@ -60,6 +64,7 @@ export class GameSession {
   private opponentHero: string | null = null;
   private mapTitle: string | null = null;
   private currentTurn = 0;
+  private recentActionTypes: string[] = []; // for cycle detection
 
   constructor(private readonly config: GameSessionConfig) {
     this.client = new OpenRouterClient({
@@ -222,14 +227,60 @@ export class GameSession {
     if (typeof view.mapTitle === 'string' && !this.mapTitle) {
       this.mapTitle = view.mapTitle;
     }
-    if (typeof view.turn === 'number') {
-      this.currentTurn = view.turn;
+    // Try multiple possible field names for turn number
+    for (const key of ['turn', 'turnNumber', 'currentTurn', 'turnCount']) {
+      if (typeof view[key] === 'number' && view[key] as number > 0) {
+        this.currentTurn = view[key] as number;
+        return;
+      }
     }
+    // If view has nested state with turn info
+    const gameState = view.gameState as Record<string, unknown> | undefined;
+    if (gameState) {
+      for (const key of ['turn', 'turnNumber', 'currentTurn', 'turnCount']) {
+        if (typeof gameState[key] === 'number' && gameState[key] as number > 0) {
+          this.currentTurn = gameState[key] as number;
+          return;
+        }
+      }
+    }
+    // Fallback: count actions as a rough turn proxy
+    if (this.actionsSubmitted > 0 && this.currentTurn === 0) {
+      this.currentTurn = Math.ceil(this.actionsSubmitted / 2);
+    }
+  }
+
+  /** Detect if we're stuck in a cycle of repeated actions. */
+  private detectCycle(): boolean {
+    if (this.recentActionTypes.length < CYCLE_WINDOW) return false;
+    const window = this.recentActionTypes.slice(-CYCLE_WINDOW);
+    const counts = new Map<string, number>();
+    for (const t of window) counts.set(t, (counts.get(t) ?? 0) + 1);
+    for (const count of counts.values()) {
+      if (count >= CYCLE_THRESHOLD) return true;
+    }
+    return false;
+  }
+
+  /** Pick a random non-forfeit action. */
+  private randomAction(legalActions: Action[]): Action {
+    const nonForfeit = legalActions.filter((a) => a.type !== 'FORFEIT');
+    const pool = nonForfeit.length > 0 ? nonForfeit : legalActions;
+    return pool[Math.floor(Math.random() * pool.length)]!;
   }
 
   private async act(state: ServerStateMessage): Promise<void> {
     if (this.stopping || this.decisionInFlight) return;
     if (!this.roomId || !this.seat || state.legalActions.length === 0) return;
+
+    // Hard cap on actions to prevent runaway games
+    if (this.actionsSubmitted >= MAX_ACTIONS) {
+      console.log(`Game ${this.config.gameId}: hit max actions (${MAX_ACTIONS}), stopping`);
+      this.stopping = true;
+      this.ws?.close(1000, 'max actions reached');
+      return;
+    }
+
     this.decisionInFlight = true;
 
     try {
@@ -269,10 +320,26 @@ export class GameSession {
       if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       if (this.stopping) return;
 
-      const choice = chooseValidatedAction(response.text, state.legalActions);
+      let choice = chooseValidatedAction(response.text, state.legalActions);
       if (choice.source === 'fallback') this.fallbacks++;
 
-      // Estimate cost from token counts if OpenRouter didn't provide it
+      // Cycle detection: if stuck in a loop, switch to random actions
+      this.recentActionTypes.push(choice.action.type);
+      if (this.recentActionTypes.length > CYCLE_WINDOW * 2) {
+        this.recentActionTypes = this.recentActionTypes.slice(-CYCLE_WINDOW);
+      }
+      if (this.detectCycle()) {
+        const randomAct = this.randomAction(state.legalActions);
+        choice = {
+          action: randomAct,
+          source: 'fallback',
+          reason: 'Cycle detected — switching to random action to break loop.',
+          confidence: null,
+        };
+        this.fallbacks++;
+        console.log(`Game ${this.config.gameId}: cycle detected at action ${this.actionsSubmitted}, using random action`);
+      }
+
       const actionCost = response.usage.cost_usd;
       this.totalCostUsd += actionCost;
 

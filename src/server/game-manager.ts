@@ -90,6 +90,8 @@ export class GameManager {
 
     const sink: GameEventSink = {
       emit: async (event: GameEvent) => {
+        // Tag event with userId for client-side filtering
+        event.data.userId = req.userId;
         // Update live info
         info.lastEvent = event;
         if (event.data.turn !== undefined) info.currentTurn = event.data.turn as number;

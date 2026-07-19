@@ -401,39 +401,62 @@ function renderModelPicker() {
   const picker = $('#model-picker');
   if (!picker) return;
 
-  picker.innerHTML = MODEL_CATALOG.map((group) => `
-    <div class="model-group">
-      <div class="model-group-header" style="border-left-color: ${group.color}">
-        <span class="model-provider-name">${group.provider}</span>
-      </div>
-      <div class="model-group-models">
-        ${group.models.map((m) => `
-          <div class="model-option ${m.id === selectedModel ? 'selected' : ''}"
-               data-model-id="${m.id}"
-               onclick="selectModel('${m.id}')">
-            <div class="model-option-name">${m.name}</div>
-            <div class="model-option-meta">
-              <span class="model-tier model-tier-${m.tier}">${m.tier}</span>
-              <span class="model-price">${m.price}</span>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `).join('');
+  // Find which provider group contains the selected model
+  const selectedProvider = MODEL_CATALOG.find((g) => g.models.some((m) => m.id === selectedModel))?.provider || '';
+  // Show the selected model name in a summary bar
+  const selectedModelObj = MODEL_CATALOG.flatMap((g) => g.models).find((m) => m.id === selectedModel);
+  const selectedProviderObj = MODEL_CATALOG.find((g) => g.models.some((m) => m.id === selectedModel));
 
-  // Set the hidden input
+  picker.innerHTML = `
+    <div class="model-selected-summary" onclick="toggleModelDropdown()">
+      <div>
+        ${selectedModelObj ? `
+          <span class="model-selected-provider" style="color: ${selectedProviderObj?.color || 'var(--text)'}">${selectedProviderObj?.provider || ''}</span>
+          <span class="model-selected-name">${selectedModelObj.name}</span>
+          <span class="model-tier model-tier-${selectedModelObj.tier}">${selectedModelObj.tier}</span>
+        ` : '<span class="model-selected-name">Select a model...</span>'}
+      </div>
+      <span class="model-dropdown-arrow">▼</span>
+    </div>
+    <div class="model-dropdown" id="model-dropdown" style="display:none">
+      ${MODEL_CATALOG.map((group) => `
+        <div class="model-group">
+          <div class="model-group-header" style="border-left-color: ${group.color}">
+            <span class="model-provider-name">${group.provider}</span>
+          </div>
+          <div class="model-group-models">
+            ${group.models.map((m) => `
+              <div class="model-option ${m.id === selectedModel ? 'selected' : ''}"
+                   data-model-id="${m.id}"
+                   onclick="event.stopPropagation(); selectModel('${m.id}')">
+                <div class="model-option-name">${m.name}</div>
+                <div class="model-option-meta">
+                  <span class="model-tier model-tier-${m.tier}">${m.tier}</span>
+                  <span class="model-price">${m.price}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
   $('#model-select').value = selectedModel;
+}
+
+function toggleModelDropdown() {
+  const dropdown = $('#model-dropdown');
+  if (!dropdown) return;
+  dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
 }
 
 function selectModel(modelId) {
   selectedModel = modelId;
   localStorage.setItem('selected_model', modelId);
-  // Update UI
-  document.querySelectorAll('.model-option').forEach((el) => {
-    el.classList.toggle('selected', el.dataset.modelId === modelId);
-  });
   $('#model-select').value = modelId;
+  // Close dropdown and re-render to update summary
+  renderModelPicker();
 }
 
 function renderNewGame() {
@@ -619,6 +642,16 @@ function timeAgo(date) {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
 }
+
+// ─── Click-outside handler for dropdowns ───────────────
+
+document.addEventListener('click', (e) => {
+  const dropdown = $('#model-dropdown');
+  const picker = document.querySelector('.model-picker');
+  if (dropdown && picker && !picker.contains(e.target)) {
+    dropdown.style.display = 'none';
+  }
+});
 
 // ─── Init ──────────────────────────────────────────────
 

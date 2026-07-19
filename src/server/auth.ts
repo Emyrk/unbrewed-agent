@@ -11,7 +11,7 @@ export function getDiscordConfig() {
   return {
     clientId: process.env.DISCORD_CLIENT_ID!,
     clientSecret: process.env.DISCORD_CLIENT_SECRET!,
-    redirectUri: process.env.DISCORD_REDIRECT_URI || `${process.env.PUBLIC_URL || 'http://localhost:3000'}/auth/callback`,
+    redirectUri: process.env.DISCORD_REDIRECT_URI || `${(process.env.PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, '')}/auth/callback`,
   };
 }
 

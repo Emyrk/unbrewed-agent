@@ -501,6 +501,12 @@ function filterModels() {
     return groups[b].length - groups[a].length;
   });
 
+  body.onclick = (e) => {
+    const el = e.target.closest('.mexplorer-model');
+    if (!el) return;
+    pickModel(el.dataset.modelId, el.dataset.modelName);
+  };
+
   body.innerHTML = sortedProviders.map((provider) => `
     <div class="mexplorer-group">
       <div class="mexplorer-group-header" style="border-left-color: ${getProviderColor(provider)}">
@@ -510,7 +516,8 @@ function filterModels() {
       <div class="mexplorer-models">
         ${groups[provider].map((m) => `
           <div class="mexplorer-model ${m.id === selectedModel ? 'selected' : ''}"
-               onclick="pickModel('${m.id}', ${JSON.stringify(m.name).replace(/'/g, "\\'")})">
+               data-model-id="${m.id}"
+               data-model-name="${m.name.replace(/"/g, '&quot;')}">
             <div class="mexplorer-model-main">
               <div class="mexplorer-model-name">${m.name}</div>
               <div class="mexplorer-model-id">${m.id}</div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterCacheCapableModels,
+  supportsGameplayModel,
   supportsPromptCaching,
   usesExplicitCacheControl,
 } from '../src/server/model-cache.js';
@@ -16,6 +17,12 @@ describe('OpenRouter prompt cache model filtering', () => {
       id: 'not-discounted/model',
       pricing: { prompt: '0.000002', input_cache_read: '0.000002' },
     })).toBe(false);
+  });
+
+  it('excludes cache-capable models where reasoning is mandatory', () => {
+    const pricing = { prompt: '0.000002', input_cache_read: '0.0000005' };
+    expect(supportsGameplayModel({ id: 'optional/reasoning', pricing, reasoning: { mandatory: false } })).toBe(true);
+    expect(supportsGameplayModel({ id: 'mandatory/reasoning', pricing, reasoning: { mandatory: true } })).toBe(false);
   });
 
   it('filters the catalog without mutating model metadata', () => {

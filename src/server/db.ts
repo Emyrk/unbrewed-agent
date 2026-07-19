@@ -95,6 +95,7 @@ export async function migrate(): Promise<void> {
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS model_output TEXT;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS selected_action JSONB;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS error_message TEXT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS model_id TEXT;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS finish_reason TEXT;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS native_finish_reason TEXT;`);
   await q(`

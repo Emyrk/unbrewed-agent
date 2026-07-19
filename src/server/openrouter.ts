@@ -59,7 +59,8 @@ export class OpenRouterClient implements PolicyClient {
             { role: 'user', content: user },
           ],
           temperature: 0.3,
-          // Reasoning models may spend completion budget before emitting visible JSON.
+          reasoning: { effort: 'none', exclude: true },
+          // Leave enough visible output budget for providers that still add overhead.
           // Keep the reason concise in the prompt, but leave enough budget to finish.
           max_tokens: 512,
         }),

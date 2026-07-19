@@ -1,5 +1,9 @@
 export interface OpenRouterModel {
   id: string;
+  reasoning?: {
+    mandatory?: boolean;
+    [key: string]: unknown;
+  };
   pricing?: {
     prompt?: string | number;
     input_cache_read?: string | number;
@@ -28,8 +32,14 @@ export function supportsPromptCaching(model: OpenRouterModel): boolean {
     && cacheRead < prompt;
 }
 
+export function supportsGameplayModel(model: OpenRouterModel): boolean {
+  return supportsPromptCaching(model) && model.reasoning?.mandatory !== true;
+}
+
 export function filterCacheCapableModels(response: OpenRouterModelsResponse): OpenRouterModelsResponse {
-  return { data: response.data.filter(supportsPromptCaching) };
+  // Gameplay requires visible, concise JSON. Mandatory-reasoning models can spend
+  // the entire completion budget before emitting content, so exclude them.
+  return { data: response.data.filter(supportsGameplayModel) };
 }
 
 /** Providers where OpenRouter documents an explicit cache_control breakpoint. */

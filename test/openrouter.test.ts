@@ -50,6 +50,7 @@ describe('OpenRouter usage telemetry', () => {
     const body = JSON.parse(String(request.body));
     expect(body.session_id).toBe('game-123');
     expect(body.max_tokens).toBe(512);
+    expect(body.reasoning).toEqual({ effort: 'none', exclude: true });
     expect(body.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' });
   });
 

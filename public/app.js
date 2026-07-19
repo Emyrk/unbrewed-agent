@@ -480,6 +480,7 @@ async function openActionDetail(gameId, actionId) {
         <div><strong>${Number(action.cache_write_tokens || 0).toLocaleString()}</strong><span>Cache-write tokens</span></div>
         <div><strong>${formatCost(action.cost_usd)}</strong><span>Cost</span></div>
         <div><strong>${action.legal_action_count ?? '-'}</strong><span>Legal actions</span></div>
+        <div><strong>${escapeHtml(action.model_id || 'Older action')}</strong><span>Model</span></div>
         <div><strong>${escapeHtml(action.native_finish_reason || action.finish_reason || '-')}</strong><span>Finish reason</span></div>
       </div>
       <div class="action-detail-scroll">

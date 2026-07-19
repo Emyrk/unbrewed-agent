@@ -428,6 +428,7 @@ export class GameSession {
           legalActionCount: state.legalActions.length,
           systemPrompt: request.system,
           userPrompt: request.user,
+          modelId: this.config.model,
           modelOutput: response.text,
           finishReason: response.finishReason,
           nativeFinishReason: response.nativeFinishReason,

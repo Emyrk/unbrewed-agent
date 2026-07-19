@@ -176,9 +176,9 @@ export class GameManager {
             (game_id, action_index, turn_number, legal_action_count, chosen_index,
              choice_source, confidence, reason, prompt_tokens, completion_tokens,
              total_tokens, cache_read_tokens, cache_write_tokens, cost_usd, latency_ms,
-             system_prompt, user_prompt, model_output, finish_reason,
+             system_prompt, user_prompt, model_id, model_output, finish_reason,
              native_finish_reason, selected_action, error_message)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
            RETURNING id`,
           [
             event.gameId,
@@ -198,6 +198,7 @@ export class GameManager {
             d.latencyMs,
             d.systemPrompt,
             d.userPrompt,
+            d.modelId,
             d.modelOutput,
             d.finishReason,
             d.nativeFinishReason,

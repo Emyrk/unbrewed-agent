@@ -194,7 +194,7 @@ app.get('/api/games/:id', async (c) => {
     `SELECT id, game_id, action_index, turn_number, legal_action_count, chosen_index,
             choice_source, confidence, reason, prompt_tokens, completion_tokens,
             total_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
-            latency_ms, finish_reason, native_finish_reason, error_message, created_at
+            latency_ms, model_id, finish_reason, native_finish_reason, error_message, created_at
      FROM game_actions WHERE game_id = $1 ORDER BY action_index`,
     [gameId],
   );

@@ -1,9 +1,9 @@
-import { serve } from '@hono/node-server';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { join, extname } from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { serveStatic } from '@hono/node-server/serve-static';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Server } from 'node:http';
 
 import { migrate } from './db.js';
 import {
@@ -19,6 +19,10 @@ import {
 import { GameManager } from './game-manager.js';
 import { query } from './db.js';
 import type { GameEvent } from './game-session.js';
+
+// Catch unhandled errors so we can see them in Railway logs
+process.on('uncaughtException', (err) => { console.error('UNCAUGHT:', err); });
+process.on('unhandledRejection', (err) => { console.error('UNHANDLED_REJECTION:', err); });
 
 const DEFAULT_WS_URL = process.env.UNBREWED_WS_URL || 'wss://unbrewed-engine-production.up.railway.app';
 
@@ -198,22 +202,88 @@ app.get('/api/stats', async (c) => {
   return c.json(stats.rows[0] ?? {});
 });
 
-// ─── Static Files (Dashboard) ──────────────────────────
+// ─── Static Files (manual, no serveStatic dependency) ──
 
-app.use('/*', serveStatic({ root: './public' }));
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
 
-// Fallback to index.html for SPA routing
-app.get('*', serveStatic({ root: './public', path: 'index.html' }));
+const PUBLIC_DIR = join(process.cwd(), 'public');
+
+app.get('/*', async (c) => {
+  // Try to serve static file from public/
+  let filePath = c.req.path === '/' ? '/index.html' : c.req.path;
+  // Prevent directory traversal
+  if (filePath.includes('..')) return c.json({ error: 'Forbidden' }, 403);
+
+  try {
+    const fullPath = join(PUBLIC_DIR, filePath);
+    const content = await readFile(fullPath);
+    const ext = extname(filePath);
+    return c.body(content, 200, {
+      'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+    });
+  } catch {
+    // SPA fallback: serve index.html for any unmatched route
+    try {
+      const content = await readFile(join(PUBLIC_DIR, 'index.html'));
+      return c.body(content, 200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache' });
+    } catch {
+      return c.json({ error: 'Not found' }, 404);
+    }
+  }
+});
 
 // ─── Start Server ──────────────────────────────────────
 
 const PORT = Number(process.env.PORT || 3000);
 
 async function start() {
-  // Start listening first so healthcheck passes while DB connects
   console.log(`Starting server on port ${PORT}`);
+  console.log(`NODE_ENV=${process.env.NODE_ENV}, DATABASE_URL=${process.env.DATABASE_URL ? 'set' : 'NOT SET'}`);
 
-  const server = serve({ fetch: app.fetch, port: PORT }) as Server;
+  // Create raw http server so we can attach WebSocket to it
+  const server = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const request = new Request(url.toString(), {
+        method: req.method ?? 'GET',
+        headers: Object.entries(req.headers).reduce<Record<string, string>>((acc, [k, v]) => {
+          if (v) acc[k] = Array.isArray(v) ? v.join(', ') : v;
+          return acc;
+        }, {}),
+        body: req.method !== 'GET' && req.method !== 'HEAD' ? new Uint8Array(await readBody(req)) : null,
+      });
+
+      const response = await app.fetch(request);
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      if (response.body) {
+        const reader = response.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+      }
+      res.end();
+    } catch (err) {
+      console.error('Request error:', err);
+      res.writeHead(500);
+      res.end('Internal Server Error');
+    }
+  });
+
+  server.listen(PORT, () => {
+    console.log(`Server listening on http://localhost:${PORT}`);
+  });
 
   // Set up WebSocket server for live game monitoring
   const wss = new WebSocketServer({ server, path: '/api/live' });
@@ -226,7 +296,6 @@ async function start() {
       }
     });
 
-    // Send current active games on connect
     const activeGames = gameManager.getActiveGames();
     if (activeGames.length > 0) {
       ws.send(JSON.stringify({ type: 'snapshot', games: activeGames }));
@@ -237,8 +306,6 @@ async function start() {
       console.log('Live monitor client disconnected');
     });
   });
-
-  console.log(`Server running at http://localhost:${PORT}`);
 
   // Run migrations after server is listening (so healthcheck passes during DB setup)
   for (let attempt = 1; attempt <= 10; attempt++) {
@@ -254,6 +321,15 @@ async function start() {
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
   }
+}
+
+function readBody(req: import('node:http').IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
 }
 
 start().catch((err) => {

@@ -10,6 +10,8 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "outDir": "dist",
+    "declaration": true,
     "types": ["node", "vitest"]
   },
   "include": ["src/**/*.ts", "test/**/*.test.ts"]

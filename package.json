@@ -10,13 +10,20 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "start": "node dist/src/server/index.js",
+    "dev": "tsx src/server/index.ts",
     "smoke": "tsx src/cli.ts --help"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.10",
+    "hono": "^4.12.31",
+    "pg": "^8.22.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.9",
+    "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",

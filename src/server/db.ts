@@ -87,6 +87,12 @@ export async function migrate(): Promise<void> {
       created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS total_tokens INT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS system_prompt TEXT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS user_prompt TEXT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS model_output TEXT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS selected_action JSONB;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS error_message TEXT;`);
   await q(`CREATE INDEX IF NOT EXISTS idx_game_actions_game ON game_actions(game_id);`);
   await q(`CREATE INDEX IF NOT EXISTS idx_games_user ON games(user_id);`);
   await q(`CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);`);

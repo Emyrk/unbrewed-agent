@@ -14,6 +14,7 @@ import {
   setSessionCookie,
   clearSessionCookie,
   getSessionUser,
+  getUserBySessionId,
   type AuthUser,
 } from './auth.js';
 import { GameManager } from './game-manager.js';
@@ -172,7 +173,10 @@ app.get('/api/games/:id', async (c) => {
   if (gameResult.rows.length === 0) return c.json({ error: 'Not found' }, 404);
 
   const actionsResult = await query(
-    `SELECT * FROM game_actions WHERE game_id = $1 ORDER BY action_index`,
+    `SELECT id, game_id, action_index, turn_number, legal_action_count, chosen_index,
+            choice_source, confidence, reason, prompt_tokens, completion_tokens,
+            total_tokens, cost_usd, latency_ms, error_message, created_at
+     FROM game_actions WHERE game_id = $1 ORDER BY action_index`,
     [gameId],
   );
 
@@ -184,6 +188,21 @@ app.get('/api/games/:id', async (c) => {
     actions: actionsResult.rows,
     live: liveInfo ?? null,
   });
+});
+
+app.get('/api/games/:id/actions/:actionId', async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const result = await query(
+    `SELECT a.*
+     FROM game_actions a
+     JOIN games g ON g.id = a.game_id
+     WHERE a.id = $1 AND a.game_id = $2 AND g.user_id = $3`,
+    [c.req.param('actionId'), c.req.param('id'), user.id],
+  );
+  if (result.rows.length === 0) return c.json({ error: 'Not found' }, 404);
+  return c.json({ action: result.rows[0] });
 });
 
 app.delete('/api/games/:id', async (c) => {
@@ -309,23 +328,32 @@ async function start() {
   // Set up WebSocket server for live game monitoring
   const wss = new WebSocketServer({ server, path: '/api/live' });
 
-  wss.on('connection', (ws) => {
-    console.log('Live monitor client connected');
-    const unsubscribe = gameManager.subscribe((event: GameEvent) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(event));
+  wss.on('connection', async (ws, request) => {
+    try {
+      const cookies = parseCookies(request.headers.cookie);
+      const user = await getUserBySessionId(cookies.ub_session);
+      if (!user) {
+        ws.close(1008, 'Unauthorized');
+        return;
       }
-    });
 
-    const activeGames = gameManager.getActiveGames();
-    if (activeGames.length > 0) {
+      console.log(`Live monitor client connected for user ${user.id}`);
+      const unsubscribe = gameManager.subscribe((event: GameEvent) => {
+        if (event.data.userId !== user.id) return;
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
+      });
+
+      const activeGames = gameManager.getActiveGames().filter((game) => game.userId === user.id);
       ws.send(JSON.stringify({ type: 'snapshot', games: activeGames }));
-    }
 
-    ws.on('close', () => {
-      unsubscribe();
-      console.log('Live monitor client disconnected');
-    });
+      ws.on('close', () => {
+        unsubscribe();
+        console.log(`Live monitor client disconnected for user ${user.id}`);
+      });
+    } catch (err) {
+      console.error('Live monitor authentication failed:', err);
+      ws.close(1011, 'Authentication failed');
+    }
   });
 
   // Run migrations after server is listening (so healthcheck passes during DB setup)
@@ -342,6 +370,14 @@ async function start() {
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
   }
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  if (!header) return {};
+  return Object.fromEntries(header.split(';').map((part) => {
+    const [name, ...value] = part.trim().split('=');
+    return [name ?? '', decodeURIComponent(value.join('='))];
+  }).filter(([name]) => Boolean(name)));
 }
 
 function readBody(req: import('node:http').IncomingMessage): Promise<Buffer> {

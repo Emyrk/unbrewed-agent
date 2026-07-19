@@ -61,7 +61,7 @@ export class OpenRouterClient implements PolicyClient {
           prompt_tokens?: number;
           completion_tokens?: number;
           total_tokens?: number;
-          cost?: number; // OpenRouter sometimes includes cost directly
+          cost?: number | string; // OpenRouter sometimes includes cost directly
         };
       };
       const text = data.choices?.[0]?.message?.content ?? '';
@@ -71,7 +71,8 @@ export class OpenRouterClient implements PolicyClient {
       const completionTokens = data.usage?.completion_tokens ?? 0;
 
       // Try to get cost: OpenRouter includes it in usage.cost or we fetch it
-      let costUsd = data.usage?.cost ?? 0;
+      let costUsd = Number(data.usage?.cost ?? 0);
+      if (!Number.isFinite(costUsd)) costUsd = 0;
       if (!costUsd && data.id) {
         costUsd = await fetchGenerationCost(this.options.apiKey, data.id);
       }

@@ -122,6 +122,17 @@ export interface AuthUser {
   avatar_url: string | null;
 }
 
+export async function getUserBySessionId(sessionId: string | undefined): Promise<AuthUser | null> {
+  if (!sessionId) return null;
+  const result = await query<{ id: string; username: string; avatar_url: string | null }>(
+    `SELECT u.id, u.username, u.avatar_url
+     FROM sessions s JOIN users u ON s.user_id = u.id
+     WHERE s.id = $1 AND s.expires_at > now()`,
+    [sessionId],
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function getSessionUser(c: Context): Promise<AuthUser | null> {
   const sessionId = getCookie(c, COOKIE_NAME);
   if (!sessionId) return null;

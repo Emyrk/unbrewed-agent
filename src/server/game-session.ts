@@ -64,6 +64,8 @@ export class GameSession {
   private opponentHero: string | null = null;
   private mapTitle: string | null = null;
   private currentTurn = 0;
+  private currentTurnOwner: string | null = null;
+  private currentPhase: string | null = null;
   private recentActionTypes: string[] = []; // for cycle detection
 
   constructor(private readonly config: GameSessionConfig) {
@@ -147,8 +149,19 @@ export class GameSession {
 
         if (msg.type === 'STATE') {
           const state = msg as unknown as ServerStateMessage;
-          // Try to extract opponent hero and map from view
           this.extractMetadata(state);
+          void this.config.sink.emit({
+            type: 'state',
+            gameId: this.config.gameId,
+            timestamp: Date.now(),
+            data: {
+              turn: this.currentTurn,
+              turnOwner: this.currentTurnOwner,
+              phase: this.currentPhase,
+              actionRequired: state.legalActions.length > 0,
+              legalActions: state.legalActions.length,
+            },
+          });
           void this.act(state).catch((err) => {
             void this.config.sink.emit({
               type: 'error',
@@ -223,30 +236,41 @@ export class GameSession {
   private extractMetadata(state: ServerStateMessage): void {
     const view = state.view as Record<string, unknown> | null;
     if (!view) return;
-    // Best-effort extraction from the player view
-    if (typeof view.mapTitle === 'string' && !this.mapTitle) {
-      this.mapTitle = view.mapTitle;
-    }
-    // Try multiple possible field names for turn number
-    for (const key of ['turn', 'turnNumber', 'currentTurn', 'turnCount']) {
-      if (typeof view[key] === 'number' && view[key] as number > 0) {
-        this.currentTurn = view[key] as number;
-        return;
+    const candidates = [view, view.gameState, view.state, view.game]
+      .filter((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value)));
+
+    let foundTurnOwner = false;
+    for (const candidate of candidates) {
+      if (typeof candidate.mapTitle === 'string' && !this.mapTitle) this.mapTitle = candidate.mapTitle;
+
+      for (const key of ['turn', 'turnNumber', 'currentTurn', 'turnCount', 'round']) {
+        if (typeof candidate[key] === 'number' && candidate[key] as number > 0) {
+          this.currentTurn = candidate[key] as number;
+          break;
+        }
       }
-    }
-    // If view has nested state with turn info
-    const gameState = view.gameState as Record<string, unknown> | undefined;
-    if (gameState) {
-      for (const key of ['turn', 'turnNumber', 'currentTurn', 'turnCount']) {
-        if (typeof gameState[key] === 'number' && gameState[key] as number > 0) {
-          this.currentTurn = gameState[key] as number;
-          return;
+
+      for (const key of ['turnOwner', 'activePlayer', 'currentPlayer', 'turnPlayer', 'activeSeat']) {
+        if (typeof candidate[key] === 'string' && candidate[key]) {
+          this.currentTurnOwner = candidate[key];
+          foundTurnOwner = true;
+          break;
+        }
+      }
+
+      for (const key of ['phase', 'currentPhase', 'step', 'prompt']) {
+        if (typeof candidate[key] === 'string' && candidate[key]) {
+          this.currentPhase = candidate[key];
+          break;
         }
       }
     }
-    // Fallback: count actions as a rough turn proxy
+
     if (this.actionsSubmitted > 0 && this.currentTurn === 0) {
       this.currentTurn = Math.ceil(this.actionsSubmitted / 2);
+    }
+    if (!foundTurnOwner) {
+      this.currentTurnOwner = state.legalActions.length > 0 ? this.seat : 'opponent';
     }
   }
 
@@ -298,17 +322,21 @@ export class GameSession {
         timestamp: Date.now(),
         data: {
           turn: this.currentTurn,
+          turnOwner: this.currentTurnOwner,
+          phase: this.currentPhase,
           legalActions: state.legalActions.length,
           actionIndex: this.actionsSubmitted,
+          model: this.config.model,
         },
       });
 
       const startedAt = Date.now();
       let response: OpenRouterResponse;
+      let llmError: string | null = null;
       try {
         response = await this.client.completeWithUsage(request.system, request.user);
       } catch (err) {
-        // On LLM failure, use fallback
+        llmError = err instanceof Error ? err.message : String(err);
         response = { text: '', usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } };
       }
       const latencyMs = Date.now() - startedAt;
@@ -361,12 +389,17 @@ export class GameSession {
           choiceSource: choice.source,
           confidence: choice.confidence,
           reason: choice.reason,
-          error: choice.error ?? null,
           promptTokens: response.usage.prompt_tokens,
           completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
           costUsd: actionCost,
           latencyMs,
           legalActionCount: state.legalActions.length,
+          systemPrompt: request.system,
+          userPrompt: request.user,
+          modelOutput: response.text,
+          selectedAction: choice.action,
+          error: choice.error ?? llmError,
         },
       });
     } finally {

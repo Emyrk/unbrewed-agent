@@ -22,6 +22,9 @@ export interface LiveGameInfo {
   model: string;
   status: 'active';
   currentTurn: number;
+  turnOwner: string | null;
+  phase: string | null;
+  thinking: boolean;
   actionsSubmitted: number;
   totalCostUsd: number;
   lastEvent: GameEvent | null;
@@ -82,6 +85,9 @@ export class GameManager {
       model: req.model,
       status: 'active',
       currentTurn: 0,
+      turnOwner: null,
+      phase: null,
+      thinking: false,
       actionsSubmitted: 0,
       totalCostUsd: 0,
       lastEvent: null,
@@ -90,26 +96,36 @@ export class GameManager {
 
     const sink: GameEventSink = {
       emit: async (event: GameEvent) => {
-        // Tag event with userId for client-side filtering
         event.data.userId = req.userId;
-        // Update live info
-        info.lastEvent = event;
         if (event.data.turn !== undefined) info.currentTurn = event.data.turn as number;
-        if (event.data.actionIndex !== undefined) info.actionsSubmitted = (event.data.actionIndex as number) + 1;
+        if (event.data.turnOwner !== undefined) info.turnOwner = event.data.turnOwner as string | null;
+        if (event.data.phase !== undefined) info.phase = event.data.phase as string | null;
+        if (event.type === 'action' && event.data.actionIndex !== undefined) {
+          info.actionsSubmitted = (event.data.actionIndex as number) + 1;
+        }
         if (event.data.totalCostUsd !== undefined) info.totalCostUsd = event.data.totalCostUsd as number;
         if (event.data.costUsd !== undefined) info.totalCostUsd += event.data.costUsd as number;
+        info.thinking = event.type === 'thinking';
 
-        // Broadcast to listeners
+        const actionId = await this.persistEvent(event);
+        if (actionId) event.data.actionId = actionId;
+
+        // Prompts may include the player's private hand. Persist them for the owner,
+        // but never put them on the shared live event stream.
+        const publicData = { ...event.data };
+        delete publicData.systemPrompt;
+        delete publicData.userPrompt;
+        delete publicData.modelOutput;
+        delete publicData.selectedAction;
+        const publicEvent: GameEvent = { ...event, data: publicData };
+        info.lastEvent = publicEvent;
         for (const listener of this.listeners) {
           try {
-            listener(event);
+            listener(publicEvent);
           } catch {
             // don't let a bad listener break the game
           }
         }
-
-        // Persist to DB
-        await this.persistEvent(event);
       },
     };
 
@@ -145,7 +161,7 @@ export class GameManager {
     return gameId;
   }
 
-  private async persistEvent(event: GameEvent): Promise<void> {
+  private async persistEvent(event: GameEvent): Promise<string | null> {
     try {
       if (event.type === 'started') {
         const { roomId, seat } = event.data;
@@ -155,12 +171,14 @@ export class GameManager {
         );
       } else if (event.type === 'action') {
         const d = event.data;
-        await query(
+        const inserted = await query<{ id: string }>(
           `INSERT INTO game_actions
             (game_id, action_index, turn_number, legal_action_count, chosen_index,
              choice_source, confidence, reason, prompt_tokens, completion_tokens,
-             cost_usd, latency_ms)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+             total_tokens, cost_usd, latency_ms, system_prompt, user_prompt,
+             model_output, selected_action, error_message)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+           RETURNING id`,
           [
             event.gameId,
             d.actionIndex,
@@ -172,8 +190,14 @@ export class GameManager {
             d.reason,
             d.promptTokens,
             d.completionTokens,
+            d.totalTokens,
             d.costUsd,
             d.latencyMs,
+            d.systemPrompt,
+            d.userPrompt,
+            d.modelOutput,
+            JSON.stringify(d.selectedAction ?? null),
+            d.error,
           ],
         );
         // Update running cost total
@@ -181,9 +205,12 @@ export class GameManager {
           'UPDATE games SET total_cost_usd = total_cost_usd + $1 WHERE id = $2',
           [d.costUsd ?? 0, event.gameId],
         );
+        return inserted.rows[0]?.id ?? null;
       }
+      return null;
     } catch (err) {
       console.error('Failed to persist game event:', err);
+      return null;
     }
   }
 

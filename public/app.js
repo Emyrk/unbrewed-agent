@@ -10,6 +10,8 @@ let currentUser = null;
 let currentPage = 'dashboard';
 let liveWs = null;
 let liveGames = new Map();
+let currentGameDetailId = null;
+let detailElapsedTimer = null;
 
 // ─── API helpers ───────────────────────────────────────
 
@@ -73,6 +75,11 @@ nav.addEventListener('click', (e) => {
 
 function navigate(page, params = {}) {
   currentPage = page;
+  if (page !== 'game-detail') currentGameDetailId = null;
+  if (detailElapsedTimer) {
+    clearInterval(detailElapsedTimer);
+    detailElapsedTimer = null;
+  }
   nav.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
   switch (page) {
     case 'dashboard': renderDashboard(); break;
@@ -265,58 +272,190 @@ function gameRow(g) {
 // ─── Game Detail ───────────────────────────────────────
 
 async function renderGameDetail(id) {
+  currentGameDetailId = id;
   app.innerHTML = '<div class="card"><div class="card-title">Loading...</div></div>';
   const data = await api(`/games/${id}`);
-  if (!data) return;
+  if (!data || currentGameDetailId !== id) return;
   const g = data.game;
-  const actions = data.actions;
-
   const result = g.status === 'active' ? 'ACTIVE' : g.won === true ? 'WIN' : g.won === false ? 'LOSS' : g.status.toUpperCase();
   const resultClass = g.won === true ? 'win' : g.won === false ? 'loss' : '';
+  const replayUrl = g.room_id ? 'https://unbrewed.xyz/pro/replays' : null;
 
-  const replayUrl = g.room_id ? `https://unbrewed.xyz/pro/replays` : null;
+  if (data.live) liveGames.set(id, data.live);
 
   app.innerHTML = `
     <div class="detail-header">
       <div>
         <button class="btn btn-outline btn-sm" onclick="navigate('history')" style="margin-bottom:0.75rem">← Back</button>
-        <div class="detail-title">${g.our_hero} vs ${g.opponent_hero || '?'}</div>
+        <div class="detail-title">${escapeHtml(g.our_hero)} vs ${escapeHtml(g.opponent_hero || '?')}</div>
         <div class="detail-meta">
-          <span>Model: <strong>${g.llm_model}</strong></span>
-          <span>Map: ${g.map_title || '?'}</span>
-          <span>Turns: ${g.total_turns ?? '?'}</span>
-          <span>Cost: <strong class="game-cost">${formatCost(g.total_cost_usd)}</strong></span>
-          ${replayUrl ? `<a href="${replayUrl}" target="_blank" class="replay-link">▶ Watch Replay</a>` : ''}
+          <span>Model: <strong>${escapeHtml(g.llm_model)}</strong></span>
+          <span>Map: ${escapeHtml(g.map_title || '?')}</span>
+          ${replayUrl ? `<a href="${replayUrl}" target="_blank" class="replay-link">▶ Replays</a>` : ''}
         </div>
       </div>
-      <div class="game-result ${resultClass}" style="font-size:1.5rem">${result}</div>
+      <div class="game-result ${resultClass}" id="detail-result" style="font-size:1.5rem">${result}</div>
     </div>
+
+    <div id="game-live-monitor"></div>
 
     ${g.analysis_summary || g.analysis_mistakes || g.analysis_lessons ? `
       <div class="analysis-section">
         <div class="card-title" style="margin-bottom:0.75rem">Post-Game Analysis</div>
-        ${g.analysis_summary ? `<div class="analysis-box"><h4>Summary</h4>${g.analysis_summary}</div>` : ''}
-        ${g.analysis_mistakes ? `<div class="analysis-box"><h4>Mistakes</h4>${g.analysis_mistakes}</div>` : ''}
-        ${g.analysis_lessons ? `<div class="analysis-box"><h4>Lessons</h4>${g.analysis_lessons}</div>` : ''}
+        ${g.analysis_summary ? `<div class="analysis-box"><h4>Summary</h4>${escapeHtml(g.analysis_summary)}</div>` : ''}
+        ${g.analysis_mistakes ? `<div class="analysis-box"><h4>Mistakes</h4>${escapeHtml(g.analysis_mistakes)}</div>` : ''}
+        ${g.analysis_lessons ? `<div class="analysis-box"><h4>Lessons</h4>${escapeHtml(g.analysis_lessons)}</div>` : ''}
       </div>
     ` : ''}
 
     <div class="card" style="margin-top:1.5rem">
-      <div class="card-title" style="margin-bottom:0.75rem">Action Log (${actions.length} actions)</div>
-      <div class="action-log">
-        ${actions.slice().reverse().map((a) => `
-          <div class="action-row">
-            <div class="action-index">#${a.action_index}</div>
-            <div class="action-reason">${a.reason || '-'}</div>
-            <div class="action-source ${a.choice_source}">${a.choice_source}</div>
-            <div class="action-cost">${formatCost(a.cost_usd)}</div>
-            <div class="action-latency">${formatDuration(a.latency_ms)}</div>
-          </div>
-        `).join('')}
-        ${actions.length === 0 ? '<div class="empty-state"><p>No actions recorded yet.</p></div>' : ''}
+      <div class="card-title" id="action-log-title" style="margin-bottom:0.75rem">Action Log (${data.actions.length} actions)</div>
+      <div class="action-log" id="action-log-container"></div>
+    </div>
+  `;
+
+  renderGameLiveMonitor(g, data.live);
+  renderActionLog(id, data.actions);
+  detailElapsedTimer = setInterval(() => {
+    if (currentGameDetailId === id) updateDetailElapsed();
+  }, 1000);
+}
+
+function renderGameLiveMonitor(game, live) {
+  const container = $('#game-live-monitor');
+  if (!container) return;
+  const isActive = game.status === 'active' && live;
+  const turn = live?.currentTurn || game.total_turns || 0;
+  const actions = live?.actionsSubmitted ?? game.total_actions ?? 0;
+  const cost = live?.totalCostUsd ?? game.total_cost_usd ?? 0;
+  const turnOwner = formatTurnOwner(live?.turnOwner, game.our_seat, live?.thinking);
+  const phase = live?.phase || (isActive ? 'Waiting for state' : 'Complete');
+  const startedAt = live?.startedAt || new Date(game.started_at).getTime();
+
+  container.innerHTML = `
+    <div class="live-detail-panel ${isActive ? 'active' : ''}" data-started-at="${startedAt}">
+      <div class="live-detail-heading">
+        <span class="${isActive ? 'live-badge' : 'game-result'}">${isActive ? '● LIVE' : 'COMPLETE'}</span>
+        <span class="live-detail-thinking" id="detail-thinking">${live?.thinking ? '🤔 Model is thinking…' : escapeHtml(phase)}</span>
+      </div>
+      <div class="live-info">
+        <div class="live-info-item"><div class="live-info-value" id="detail-turn">${turn || '-'}</div><div class="live-info-label">Turn</div></div>
+        <div class="live-info-item"><div class="live-info-value" id="detail-turn-owner">${escapeHtml(turnOwner)}</div><div class="live-info-label">Who Acts</div></div>
+        <div class="live-info-item"><div class="live-info-value" id="detail-actions">${actions}</div><div class="live-info-label">Actions</div></div>
+        <div class="live-info-item"><div class="live-info-value" id="detail-cost">${formatCost(cost)}</div><div class="live-info-label">Total Cost</div></div>
+        <div class="live-info-item"><div class="live-info-value" id="detail-elapsed">${formatDuration(Date.now() - startedAt)}</div><div class="live-info-label">Elapsed</div></div>
+        <div class="live-info-item"><div class="live-info-value live-phase" id="detail-phase">${escapeHtml(phase)}</div><div class="live-info-label">Phase</div></div>
       </div>
     </div>
   `;
+}
+
+function renderActionLog(gameId, actions) {
+  const container = $('#action-log-container');
+  const title = $('#action-log-title');
+  if (!container) return;
+  if (title) title.textContent = `Action Log (${actions.length} actions)`;
+  container.innerHTML = actions.length === 0
+    ? '<div class="empty-state"><p>No actions recorded yet.</p></div>'
+    : actions.slice().reverse().map((a) => actionRowHtml(gameId, a)).join('');
+}
+
+function actionRowHtml(gameId, action) {
+  const promptTokens = Number(action.prompt_tokens || 0);
+  const completionTokens = Number(action.completion_tokens || 0);
+  const totalTokens = Number(action.total_tokens || promptTokens + completionTokens);
+  return `
+    <button class="action-row action-row-clickable" onclick="openActionDetail('${gameId}', '${action.id}')">
+      <div class="action-index">#${action.action_index}</div>
+      <div class="action-reason">${escapeHtml(action.reason || '-')}</div>
+      <div class="action-source ${action.choice_source}">${escapeHtml(action.choice_source)}</div>
+      <div class="action-tokens" title="${promptTokens} input + ${completionTokens} output">${formatTokenCount(totalTokens)} tok</div>
+      <div class="action-cost">${formatCost(action.cost_usd)}</div>
+      <div class="action-latency">${formatDuration(action.latency_ms)}</div>
+    </button>
+  `;
+}
+
+async function refreshGameDetail(gameId) {
+  if (currentGameDetailId !== gameId) return;
+  const data = await api(`/games/${gameId}`);
+  if (!data || currentGameDetailId !== gameId) return;
+  if (data.live) liveGames.set(gameId, data.live);
+  renderGameLiveMonitor(data.game, data.live);
+  renderActionLog(gameId, data.actions);
+}
+
+async function openActionDetail(gameId, actionId) {
+  const data = await api(`/games/${gameId}/actions/${actionId}`);
+  if (!data?.action) return;
+  const action = data.action;
+  const totalTokens = Number(action.total_tokens || (Number(action.prompt_tokens || 0) + Number(action.completion_tokens || 0)));
+  const systemChars = String(action.system_prompt || '').length;
+  const userChars = String(action.user_prompt || '').length;
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'action-detail-modal';
+  modal.innerHTML = `
+    <div class="modal-content action-detail-modal">
+      <div class="modal-header">
+        <div>
+          <div class="card-title">Action #${action.action_index}</div>
+          <div class="action-detail-summary">
+            ${formatCost(action.cost_usd)} · ${formatTokenCount(totalTokens)} tokens · ${formatDuration(action.latency_ms)}
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="closeActionDetail()">✕</button>
+      </div>
+      <div class="action-detail-metrics">
+        <div><strong>${Number(action.prompt_tokens || 0).toLocaleString()}</strong><span>Input tokens</span></div>
+        <div><strong>${Number(action.completion_tokens || 0).toLocaleString()}</strong><span>Output tokens</span></div>
+        <div><strong>${totalTokens.toLocaleString()}</strong><span>Total tokens</span></div>
+        <div><strong>${formatCost(action.cost_usd)}</strong><span>Cost</span></div>
+        <div><strong>${action.legal_action_count ?? '-'}</strong><span>Legal actions</span></div>
+      </div>
+      <div class="action-detail-scroll">
+        <section><h3>System prompt · ${systemChars.toLocaleString()} characters</h3><pre id="action-system-prompt"></pre></section>
+        <section><h3>User prompt / game state · ${userChars.toLocaleString()} characters</h3><pre id="action-user-prompt"></pre></section>
+        <section><h3>Model output</h3><pre id="action-model-output"></pre></section>
+        <section><h3>Selected action</h3><pre id="action-selected-action"></pre></section>
+        ${action.error_message ? '<section><h3>Error / fallback</h3><pre id="action-error"></pre></section>' : ''}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  $('#action-system-prompt').textContent = action.system_prompt || 'Not recorded for this older action.';
+  $('#action-user-prompt').textContent = prettyJson(action.user_prompt);
+  $('#action-model-output').textContent = action.model_output || 'No model output recorded.';
+  $('#action-selected-action').textContent = JSON.stringify(action.selected_action, null, 2);
+  if (action.error_message && $('#action-error')) $('#action-error').textContent = action.error_message;
+  modal.addEventListener('click', (event) => { if (event.target === modal) closeActionDetail(); });
+}
+
+function closeActionDetail() {
+  $('#action-detail-modal')?.remove();
+}
+
+function updateDetailElapsed() {
+  const panel = document.querySelector('.live-detail-panel');
+  const elapsed = $('#detail-elapsed');
+  if (!panel || !elapsed) return;
+  elapsed.textContent = formatDuration(Date.now() - Number(panel.dataset.startedAt || Date.now()));
+}
+
+function updateDetailFromLiveEvent(game, event) {
+  const data = event.data || {};
+  const setText = (selector, value) => {
+    const element = $(selector);
+    if (element && value !== undefined && value !== null) element.textContent = String(value);
+  };
+  if (data.turn !== undefined) setText('#detail-turn', data.turn || '-');
+  if (data.turnOwner !== undefined || event.type === 'thinking') {
+    setText('#detail-turn-owner', formatTurnOwner(data.turnOwner ?? game.turnOwner, null, event.type === 'thinking'));
+  }
+  if (event.type === 'action' && data.actionIndex !== undefined) setText('#detail-actions', data.actionIndex + 1);
+  if (data.costUsd !== undefined) setText('#detail-cost', formatCost(game.totalCostUsd));
+  if (data.phase !== undefined) setText('#detail-phase', data.phase || '-');
+  setText('#detail-thinking', event.type === 'thinking' ? '🤔 Model is thinking…' : (data.reason || data.phase || 'Waiting for next state'));
 }
 
 // ─── New Game ──────────────────────────────────────────
@@ -702,8 +841,18 @@ function connectLiveWs() {
     if (game) {
       game.lastEvent = data;
       if (data.data?.turn !== undefined) game.currentTurn = data.data.turn;
-      if (data.data?.actionIndex !== undefined) game.actionsSubmitted = data.data.actionIndex + 1;
+      if (data.data?.turnOwner !== undefined) game.turnOwner = data.data.turnOwner;
+      if (data.data?.phase !== undefined) game.phase = data.data.phase;
+      if (data.type === 'action' && data.data?.actionIndex !== undefined) {
+        game.actionsSubmitted = data.data.actionIndex + 1;
+      }
       if (data.data?.costUsd !== undefined) game.totalCostUsd += data.data.costUsd;
+      game.thinking = data.type === 'thinking';
+
+      if (currentGameDetailId === gameId) {
+        updateDetailFromLiveEvent(game, data);
+        if (data.type === 'action' || data.type === 'ended') void refreshGameDetail(gameId);
+      }
 
       if (data.type === 'ended') {
         liveGames.delete(gameId);
@@ -721,6 +870,39 @@ function connectLiveWs() {
 }
 
 // ─── Utilities ─────────────────────────────────────────
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function prettyJson(value) {
+  if (!value) return 'Not recorded for this older action.';
+  try {
+    return JSON.stringify(typeof value === 'string' ? JSON.parse(value) : value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatTokenCount(value) {
+  const n = Number(value || 0);
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return n.toLocaleString();
+}
+
+function formatTurnOwner(owner, ourSeat, thinking = false) {
+  if (thinking) return 'Agent';
+  if (!owner) return 'Unknown';
+  if (ourSeat && owner === ourSeat) return 'Agent';
+  if (owner === 'opponent') return 'Opponent';
+  return String(owner);
+}
 
 function formatCost(value) {
   const n = Number(value || 0);

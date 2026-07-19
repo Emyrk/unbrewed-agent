@@ -288,6 +288,7 @@ export class GameSession {
         state,
         seat: this.seat,
         roomId: this.roomId,
+        ownHeroId: this.config.heroId,
         strategyNotes: this.config.strategyNotes,
       });
 

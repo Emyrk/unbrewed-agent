@@ -111,7 +111,7 @@ async function renderDashboard() {
         <div class="stat-label">Win Rate</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">$${Number(stats.total_cost).toFixed(2)}</div>
+        <div class="stat-value">${formatCost(stats.total_cost)}</div>
         <div class="stat-label">Total Spent</div>
       </div>
       <div class="stat-card">
@@ -201,7 +201,7 @@ function liveGameCard(game) {
           <div class="live-info-label">Actions</div>
         </div>
         <div class="live-info-item">
-          <div class="live-info-value">$${game.totalCostUsd.toFixed(4)}</div>
+          <div class="live-info-value">${formatCost(game.totalCostUsd)}</div>
           <div class="live-info-label">Cost</div>
         </div>
         <div class="live-info-item">
@@ -239,7 +239,7 @@ function gameRow(g) {
   const result = g.status === 'active' ? 'active' : g.won === true ? 'won' : g.won === false ? 'lost' : g.status;
   const resultLabel = g.status === 'active' ? '● LIVE' : g.won === true ? 'WIN' : g.won === false ? 'LOSS' : g.status.toUpperCase();
   const time = g.started_at ? timeAgo(new Date(g.started_at)) : '';
-  const cost = g.total_cost_usd != null ? `$${Number(g.total_cost_usd).toFixed(4)}` : '-';
+  const cost = g.total_cost_usd != null ? formatCost(g.total_cost_usd) : '-';
 
   return `
     <div class="game-row" onclick="navigate('game-detail', {id:'${g.id}'})">
@@ -278,7 +278,7 @@ async function renderGameDetail(id) {
           <span>Model: <strong>${g.llm_model}</strong></span>
           <span>Map: ${g.map_title || '?'}</span>
           <span>Turns: ${g.total_turns ?? '?'}</span>
-          <span>Cost: <strong class="game-cost">$${Number(g.total_cost_usd || 0).toFixed(4)}</strong></span>
+          <span>Cost: <strong class="game-cost">${formatCost(g.total_cost_usd)}</strong></span>
         </div>
       </div>
       <div class="game-result ${resultClass}" style="font-size:1.5rem">${result}</div>
@@ -301,7 +301,7 @@ async function renderGameDetail(id) {
             <div class="action-index">#${a.action_index}</div>
             <div class="action-reason">${a.reason || '-'}</div>
             <div class="action-source ${a.choice_source}">${a.choice_source}</div>
-            <div class="action-cost">$${Number(a.cost_usd || 0).toFixed(4)}</div>
+            <div class="action-cost">${formatCost(a.cost_usd)}</div>
             <div class="action-latency">${a.latency_ms || 0}ms</div>
           </div>
         `).join('')}
@@ -595,6 +595,14 @@ function connectLiveWs() {
 }
 
 // ─── Utilities ─────────────────────────────────────────
+
+function formatCost(value) {
+  const n = Number(value || 0);
+  if (n === 0) return '$0';
+  if (n >= 1) return `$${n.toFixed(2)}`;
+  if (n >= 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(6)}`;
+}
 
 function timeAgo(date) {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);

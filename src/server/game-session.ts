@@ -263,6 +263,12 @@ export class GameSession {
 
       if (this.stopping) return;
 
+      // Enforce minimum delay so the game doesn't play inhumanly fast
+      const MIN_ACTION_DELAY_MS = 250;
+      const remaining = MIN_ACTION_DELAY_MS - latencyMs;
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (this.stopping) return;
+
       const choice = chooseValidatedAction(response.text, state.legalActions);
       if (choice.source === 'fallback') this.fallbacks++;
 

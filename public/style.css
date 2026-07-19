@@ -380,6 +380,41 @@ main {
 }
 .form-radio input { display: none; }
 
+/* ─── Replay Links ─── */
+.replay-link {
+  color: var(--gold);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius);
+  transition: all 0.2s;
+}
+.replay-link:hover {
+  background: var(--gold);
+  color: var(--bg-dark);
+}
+.replay-link-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold);
+  text-decoration: none;
+  font-size: 0.75rem;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 50%;
+  margin-left: 0.4rem;
+  transition: all 0.2s;
+  vertical-align: middle;
+}
+.replay-link-sm:hover {
+  background: var(--gold);
+  color: var(--bg-dark);
+}
+
 /* ─── Model Picker ─── */
 .model-picker {
   display: flex;

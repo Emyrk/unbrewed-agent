@@ -241,6 +241,8 @@ function gameRow(g) {
   const time = g.started_at ? timeAgo(new Date(g.started_at)) : '';
   const cost = g.total_cost_usd != null ? formatCost(g.total_cost_usd) : '-';
 
+  const replayUrl = g.room_id && g.status === 'completed' ? `https://pro.unbrewed.xyz/replay/${g.room_id}` : null;
+
   return `
     <div class="game-row" onclick="navigate('game-detail', {id:'${g.id}'})">
       <div>
@@ -252,7 +254,10 @@ function gameRow(g) {
       <div class="game-cost">${cost}</div>
       <div>${g.total_turns ?? '-'} turns</div>
       <div>${g.map_title || '-'}</div>
-      <div class="game-time">${time}</div>
+      <div class="game-time">
+        ${time}
+        ${replayUrl ? `<a href="${replayUrl}" target="_blank" class="replay-link-sm" onclick="event.stopPropagation()">▶</a>` : ''}
+      </div>
     </div>
   `;
 }
@@ -269,6 +274,8 @@ async function renderGameDetail(id) {
   const result = g.status === 'active' ? 'ACTIVE' : g.won === true ? 'WIN' : g.won === false ? 'LOSS' : g.status.toUpperCase();
   const resultClass = g.won === true ? 'win' : g.won === false ? 'loss' : '';
 
+  const replayUrl = g.room_id ? `https://pro.unbrewed.xyz/replay/${g.room_id}` : null;
+
   app.innerHTML = `
     <div class="detail-header">
       <div>
@@ -279,6 +286,7 @@ async function renderGameDetail(id) {
           <span>Map: ${g.map_title || '?'}</span>
           <span>Turns: ${g.total_turns ?? '?'}</span>
           <span>Cost: <strong class="game-cost">${formatCost(g.total_cost_usd)}</strong></span>
+          ${replayUrl ? `<a href="${replayUrl}" target="_blank" class="replay-link">▶ Watch Replay</a>` : ''}
         </div>
       </div>
       <div class="game-result ${resultClass}" style="font-size:1.5rem">${result}</div>

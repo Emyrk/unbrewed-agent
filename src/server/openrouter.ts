@@ -1,15 +1,19 @@
 import type { PolicyClient } from '../hermes.js';
+import { usesExplicitCacheControl } from './model-cache.js';
 
 export interface OpenRouterOptions {
   apiKey: string;
   model: string;
   timeoutMs: number;
+  sessionId?: string | undefined;
 }
 
 export interface OpenRouterUsage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   cost_usd: number;
 }
 
@@ -42,8 +46,14 @@ export class OpenRouterClient implements PolicyClient {
         },
         body: JSON.stringify({
           model: this.options.model,
+          session_id: this.options.sessionId,
           messages: [
-            { role: 'system', content: system },
+            {
+              role: 'system',
+              content: usesExplicitCacheControl(this.options.model)
+                ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+                : system,
+            },
             { role: 'user', content: user },
           ],
           temperature: 0.3,
@@ -61,6 +71,12 @@ export class OpenRouterClient implements PolicyClient {
           prompt_tokens?: number;
           completion_tokens?: number;
           total_tokens?: number;
+          prompt_tokens_details?: {
+            cached_tokens?: number;
+            cache_write_tokens?: number;
+          };
+          cache_read_tokens?: number;
+          cache_write_tokens?: number;
           cost?: number | string; // OpenRouter sometimes includes cost directly
         };
       };
@@ -81,6 +97,12 @@ export class OpenRouterClient implements PolicyClient {
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
         total_tokens: data.usage?.total_tokens ?? promptTokens + completionTokens,
+        cache_read_tokens: data.usage?.prompt_tokens_details?.cached_tokens
+          ?? data.usage?.cache_read_tokens
+          ?? 0,
+        cache_write_tokens: data.usage?.prompt_tokens_details?.cache_write_tokens
+          ?? data.usage?.cache_write_tokens
+          ?? 0,
         cost_usd: costUsd,
       };
       return { text, usage };

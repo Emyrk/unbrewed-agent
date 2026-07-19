@@ -73,6 +73,7 @@ export class GameSession {
       apiKey: config.openRouterApiKey,
       model: config.model,
       timeoutMs: config.timeoutMs,
+      sessionId: config.gameId,
     });
   }
 
@@ -337,7 +338,17 @@ export class GameSession {
         response = await this.client.completeWithUsage(request.system, request.user);
       } catch (err) {
         llmError = err instanceof Error ? err.message : String(err);
-        response = { text: '', usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } };
+        response = {
+          text: '',
+          usage: {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cost_usd: 0,
+          },
+        };
       }
       const latencyMs = Date.now() - startedAt;
 
@@ -392,6 +403,8 @@ export class GameSession {
           promptTokens: response.usage.prompt_tokens,
           completionTokens: response.usage.completion_tokens,
           totalTokens: response.usage.total_tokens,
+          cacheReadTokens: response.usage.cache_read_tokens,
+          cacheWriteTokens: response.usage.cache_write_tokens,
           costUsd: actionCost,
           latencyMs,
           legalActionCount: state.legalActions.length,

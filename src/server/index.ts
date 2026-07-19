@@ -19,6 +19,7 @@ import {
 } from './auth.js';
 import { GameManager } from './game-manager.js';
 import { query } from './db.js';
+import { filterCacheCapableModels, type OpenRouterModelsResponse } from './model-cache.js';
 import type { GameEvent } from './game-session.js';
 
 // Catch unhandled errors so we can see them in Railway logs
@@ -71,21 +72,26 @@ app.get('/api/me', async (c) => {
 
 // ─── OpenRouter Models Proxy (cached) ──────────────────
 
-let modelsCache: { data: unknown; fetchedAt: number } | null = null;
+let modelsCache: { data: OpenRouterModelsResponse; fetchedAt: number } | null = null;
 const MODELS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-app.get('/api/models', async (c) => {
+async function getCacheCapableModels(): Promise<OpenRouterModelsResponse> {
   const now = Date.now();
-  if (modelsCache && now - modelsCache.fetchedAt < MODELS_CACHE_TTL_MS) {
-    return c.json(modelsCache.data);
-  }
+  if (modelsCache && now - modelsCache.fetchedAt < MODELS_CACHE_TTL_MS) return modelsCache.data;
+
+  const res = await fetch('https://openrouter.ai/api/v1/models');
+  if (!res.ok) throw new Error(`OpenRouter models API returned ${res.status}`);
+  const response = await res.json() as OpenRouterModelsResponse;
+  const filtered = filterCacheCapableModels(response);
+  modelsCache = { data: filtered, fetchedAt: now };
+  return filtered;
+}
+
+app.get('/api/models', async (c) => {
   try {
-    const res = await fetch('https://openrouter.ai/api/v1/models');
-    if (!res.ok) return c.json({ error: 'Failed to fetch models' }, 502);
-    const data = await res.json();
-    modelsCache = { data, fetchedAt: now };
-    return c.json(data);
+    return c.json(await getCacheCapableModels());
   } catch (err) {
+    console.error('Failed to fetch cache-capable OpenRouter models:', err);
     return c.json({ error: 'Failed to fetch models' }, 502);
   }
 });
@@ -117,6 +123,17 @@ app.post('/api/games', async (c) => {
 
   if (!body.heroId || !body.model || !body.openRouterApiKey) {
     return c.json({ error: 'heroId, model, and openRouterApiKey are required' }, 400);
+  }
+
+  let cacheCapableModels: OpenRouterModelsResponse;
+  try {
+    cacheCapableModels = await getCacheCapableModels();
+  } catch (err) {
+    console.error('Could not validate model cache support:', err);
+    return c.json({ error: 'Could not validate OpenRouter model cache support. Try again shortly.' }, 503);
+  }
+  if (!cacheCapableModels.data.some((model) => model.id === body.model)) {
+    return c.json({ error: 'This model does not advertise discounted prompt-cache reads and is disabled.' }, 400);
   }
 
   const gameId = await gameManager.startGame({
@@ -175,7 +192,8 @@ app.get('/api/games/:id', async (c) => {
   const actionsResult = await query(
     `SELECT id, game_id, action_index, turn_number, legal_action_count, chosen_index,
             choice_source, confidence, reason, prompt_tokens, completion_tokens,
-            total_tokens, cost_usd, latency_ms, error_message, created_at
+            total_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
+            latency_ms, error_message, created_at
      FROM game_actions WHERE game_id = $1 ORDER BY action_index`,
     [gameId],
   );

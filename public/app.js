@@ -410,6 +410,8 @@ async function openActionDetail(gameId, actionId) {
         <div><strong>${Number(action.prompt_tokens || 0).toLocaleString()}</strong><span>Input tokens</span></div>
         <div><strong>${Number(action.completion_tokens || 0).toLocaleString()}</strong><span>Output tokens</span></div>
         <div><strong>${totalTokens.toLocaleString()}</strong><span>Total tokens</span></div>
+        <div><strong>${Number(action.cache_read_tokens || 0).toLocaleString()}</strong><span>Cache-read tokens</span></div>
+        <div><strong>${Number(action.cache_write_tokens || 0).toLocaleString()}</strong><span>Cache-write tokens</span></div>
         <div><strong>${formatCost(action.cost_usd)}</strong><span>Cost</span></div>
         <div><strong>${action.legal_action_count ?? '-'}</strong><span>Legal actions</span></div>
       </div>
@@ -495,6 +497,8 @@ async function loadModels() {
           contextLength: m.context_length || 0,
           promptPrice: parseFloat(m.pricing?.prompt || '0'),
           completionPrice: parseFloat(m.pricing?.completion || '0'),
+          cacheReadPrice: parseFloat(m.pricing?.input_cache_read || '0'),
+          cacheWritePrice: parseFloat(m.pricing?.input_cache_write || '0'),
           description: m.description?.slice(0, 200) || '',
           created: m.created || 0,
         }))
@@ -532,7 +536,7 @@ function renderModelPicker() {
         <span class="model-selected-provider" style="color: ${color}">${providerSlug}</span>
         <span class="model-selected-name">${selectedModelName}</span>
       </div>
-      <span class="model-dropdown-arrow">Browse ▶</span>
+      <span class="model-dropdown-arrow">⚡ Cache enabled · Browse ▶</span>
     </div>
   `;
   $('#model-select').value = selectedModel;
@@ -546,7 +550,10 @@ function openModelExplorer() {
   modal.innerHTML = `
     <div class="modal-content model-explorer">
       <div class="modal-header">
-        <h2 class="card-title" style="font-size:1rem">Select a Model</h2>
+        <div>
+          <h2 class="card-title" style="font-size:1rem">Select a Cache-Capable Model</h2>
+          <div class="form-hint">Only models advertising discounted prompt-cache reads are available.</div>
+        </div>
         <button class="btn btn-outline btn-sm" onclick="closeModelExplorer()">✕</button>
       </div>
       <div class="model-explorer-toolbar">
@@ -665,6 +672,7 @@ function filterModels() {
               <div class="mexplorer-model-ctx">${m.contextLength > 0 ? (m.contextLength >= 1000000 ? `${(m.contextLength/1000000).toFixed(1)}M` : `${Math.round(m.contextLength/1000)}k`) : '?'} ctx</div>
               <div class="mexplorer-model-price">
                 <span class="price-label">in</span> ${formatPrice(m.promptPrice)}
+                <span class="price-label">cached</span> ${formatPrice(m.cacheReadPrice)}
                 <span class="price-label">out</span> ${formatPrice(m.completionPrice)}
               </div>
             </div>
@@ -741,8 +749,13 @@ function renderNewGame() {
     </div>
   `;
 
-  // Render model picker
+  // Render model picker and replace any stale, non-cache-capable selection.
   renderModelPicker();
+  void loadModels().then(() => {
+    if (allModels.length > 0 && !allModels.some((model) => model.id === selectedModel)) {
+      pickModel(allModels[0].id, allModels[0].name);
+    }
+  });
 
   // Toggle mode
   document.querySelectorAll('input[name="mode"]').forEach((radio) => {
@@ -782,6 +795,8 @@ async function startGame() {
   });
   if (result?.gameId) {
     navigate('live');
+  } else if (result?.error) {
+    alert(result.error);
   }
 }
 

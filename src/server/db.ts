@@ -87,6 +87,8 @@ export async function migrate(): Promise<void> {
       created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS cache_read_tokens INT;`);
+  await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS cache_write_tokens INT;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS total_tokens INT;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS system_prompt TEXT;`);
   await q(`ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS user_prompt TEXT;`);

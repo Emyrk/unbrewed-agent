@@ -313,10 +313,125 @@ async function renderGameDetail(id) {
 
 // ─── New Game ──────────────────────────────────────────
 
+// ─── Model Catalog ─────────────────────────────────────
+
+const MODEL_CATALOG = [
+  {
+    provider: 'Anthropic',
+    color: '#d4a27f',
+    models: [
+      { id: 'anthropic/claude-sonnet-4-20250514', name: 'Claude Sonnet 4', tier: 'pro', price: '$$' },
+      { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', tier: 'pro', price: '$$' },
+      { id: 'anthropic/claude-3.5-haiku', name: 'Claude 3.5 Haiku', tier: 'budget', price: '$' },
+    ],
+  },
+  {
+    provider: 'OpenAI',
+    color: '#74aa9c',
+    models: [
+      { id: 'openai/gpt-4.1', name: 'GPT-4.1', tier: 'pro', price: '$$' },
+      { id: 'openai/gpt-4o', name: 'GPT-4o', tier: 'pro', price: '$$' },
+      { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', tier: 'budget', price: '$' },
+      { id: 'openai/o4-mini', name: 'o4-mini', tier: 'reasoning', price: '$$' },
+    ],
+  },
+  {
+    provider: 'Google',
+    color: '#4285f4',
+    models: [
+      { id: 'google/gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', tier: 'pro', price: '$$' },
+      { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash', tier: 'budget', price: '$' },
+      { id: 'google/gemini-2.5-flash-preview:thinking', name: 'Gemini 2.5 Flash Thinking', tier: 'reasoning', price: '$' },
+    ],
+  },
+  {
+    provider: 'DeepSeek',
+    color: '#5b8def',
+    models: [
+      { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1', tier: 'reasoning', price: '$' },
+      { id: 'deepseek/deepseek-chat-v3-0324', name: 'DeepSeek V3', tier: 'budget', price: '$' },
+      { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', tier: 'budget', price: '$' },
+    ],
+  },
+  {
+    provider: 'Meta',
+    color: '#0668e1',
+    models: [
+      { id: 'meta-llama/llama-4-maverick', name: 'Llama 4 Maverick', tier: 'pro', price: '$' },
+      { id: 'meta-llama/llama-4-scout', name: 'Llama 4 Scout', tier: 'budget', price: '$' },
+    ],
+  },
+  {
+    provider: 'xAI',
+    color: '#999',
+    models: [
+      { id: 'x-ai/grok-3', name: 'Grok 3', tier: 'pro', price: '$$' },
+      { id: 'x-ai/grok-3-mini', name: 'Grok 3 Mini', tier: 'budget', price: '$' },
+    ],
+  },
+  {
+    provider: 'Mistral',
+    color: '#ff7000',
+    models: [
+      { id: 'mistralai/mistral-large-2411', name: 'Mistral Large', tier: 'pro', price: '$$' },
+      { id: 'mistralai/mistral-small-3.1-24b-instruct', name: 'Mistral Small 3.1', tier: 'budget', price: '$' },
+    ],
+  },
+  {
+    provider: 'Qwen',
+    color: '#6c5ce7',
+    models: [
+      { id: 'qwen/qwen3-235b-a22b', name: 'Qwen3 235B', tier: 'pro', price: '$' },
+      { id: 'qwen/qwen3-30b-a3b', name: 'Qwen3 30B', tier: 'budget', price: '$' },
+    ],
+  },
+];
+
+let selectedModel = localStorage.getItem('selected_model') || 'anthropic/claude-sonnet-4-20250514';
+
+function renderModelPicker() {
+  const picker = $('#model-picker');
+  if (!picker) return;
+
+  picker.innerHTML = MODEL_CATALOG.map((group) => `
+    <div class="model-group">
+      <div class="model-group-header" style="border-left-color: ${group.color}">
+        <span class="model-provider-name">${group.provider}</span>
+      </div>
+      <div class="model-group-models">
+        ${group.models.map((m) => `
+          <div class="model-option ${m.id === selectedModel ? 'selected' : ''}"
+               data-model-id="${m.id}"
+               onclick="selectModel('${m.id}')">
+            <div class="model-option-name">${m.name}</div>
+            <div class="model-option-meta">
+              <span class="model-tier model-tier-${m.tier}">${m.tier}</span>
+              <span class="model-price">${m.price}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  // Set the hidden input
+  $('#model-select').value = selectedModel;
+}
+
+function selectModel(modelId) {
+  selectedModel = modelId;
+  localStorage.setItem('selected_model', modelId);
+  // Update UI
+  document.querySelectorAll('.model-option').forEach((el) => {
+    el.classList.toggle('selected', el.dataset.modelId === modelId);
+  });
+  $('#model-select').value = modelId;
+}
+
 function renderNewGame() {
   const savedApiKey = localStorage.getItem('openrouter_key') || '';
   app.innerHTML = `
-    <div class="card" style="max-width:600px">
+    <div class="card" style="max-width:700px">
       <div class="card-title" style="margin-bottom:1.25rem">Start New Game</div>
 
       <div class="form-group">
@@ -350,15 +465,8 @@ function renderNewGame() {
 
       <div class="form-group">
         <label>LLM Model (OpenRouter)</label>
-        <select id="model-select">
-          <option value="anthropic/claude-sonnet-4-20250514">Claude Sonnet 4</option>
-          <option value="openai/gpt-4o">GPT-4o</option>
-          <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-          <option value="google/gemini-2.5-flash-preview">Gemini 2.5 Flash</option>
-          <option value="google/gemini-2.5-pro-preview">Gemini 2.5 Pro</option>
-          <option value="deepseek/deepseek-chat-v3-0324">DeepSeek V3</option>
-          <option value="meta-llama/llama-4-maverick">Llama 4 Maverick</option>
-        </select>
+        <div class="model-picker" id="model-picker"></div>
+        <input type="hidden" id="model-select" value="">
       </div>
 
       <div class="form-group">
@@ -370,6 +478,9 @@ function renderNewGame() {
       <button class="btn btn-gold" onclick="startGame()">⚔️ Start Game</button>
     </div>
   `;
+
+  // Render model picker
+  renderModelPicker();
 
   // Toggle mode
   document.querySelectorAll('input[name="mode"]').forEach((radio) => {

@@ -28,6 +28,9 @@ const gameManager = new GameManager();
 // Middleware
 app.use('/api/*', cors());
 
+// Health check — no DB required, just proves the process is up
+app.get('/health', (c) => c.json({ status: 'ok' }));
+
 // ─── Auth Routes ───────────────────────────────────────
 
 app.get('/auth/login', (c) => {
@@ -207,7 +210,7 @@ app.get('*', serveStatic({ root: './public', path: 'index.html' }));
 const PORT = Number(process.env.PORT || 3000);
 
 async function start() {
-  await migrate();
+  // Start listening first so healthcheck passes while DB connects
   console.log(`Starting server on port ${PORT}`);
 
   const server = serve({ fetch: app.fetch, port: PORT }) as Server;
@@ -236,6 +239,21 @@ async function start() {
   });
 
   console.log(`Server running at http://localhost:${PORT}`);
+
+  // Run migrations after server is listening (so healthcheck passes during DB setup)
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      await migrate();
+      break;
+    } catch (err) {
+      console.error(`Migration attempt ${attempt}/10 failed:`, err);
+      if (attempt === 10) {
+        console.error('All migration attempts failed, exiting');
+        process.exit(1);
+      }
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
 }
 
 start().catch((err) => {
